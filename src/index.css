@@ -1,0 +1,148 @@
+@import "tailwindcss";
+
+html {
+  scroll-behavior: smooth;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow-x: hidden;
+  background: #f5f1ec;
+  color: #171412;
+  font-family: "Inter", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+section {
+  width: 100%;
+}
+
+::selection {
+  background: #1d1a18;
+  color: #ffffff;
+}
+
+.haya-rich-editor h1,
+.haya-rich-content h1 {
+  margin: 18px 0 10px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 28px;
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+}
+
+.haya-rich-editor h2,
+.haya-rich-content h2 {
+  margin: 16px 0 8px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 22px;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+
+.haya-rich-editor p,
+.haya-rich-content p {
+  margin: 10px 0;
+}
+
+.haya-rich-editor strong,
+.haya-rich-content strong {
+  font-weight: 700;
+  color: #211c18;
+}
+
+.haya-rich-editor em,
+.haya-rich-content em {
+  font-style: italic;
+}
+
+.haya-rich-editor u,
+.haya-rich-content u {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.haya-rich-editor ul,
+.haya-rich-content ul {
+  margin: 12px 0;
+  padding-left: 22px;
+  list-style-type: disc;
+}
+
+.haya-rich-editor ol,
+.haya-rich-content ol {
+  margin: 12px 0;
+  padding-left: 22px;
+  list-style-type: decimal;
+}
+
+.haya-rich-editor li,
+.haya-rich-content li {
+  margin: 6px 0;
+  padding-left: 2px;
+}
+
+.haya-rich-editor a,
+.haya-rich-content a {
+  color: #211c18;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.haya-rich-editor img,
+.haya-rich-content img {
+  margin: 18px 0;
+  max-width: 100%;
+  border-radius: 0;
+}
+
+/* Global dark button/link text safety fix */
+.bg-\[\#211c18\],
+.bg-black,
+a.bg-\[\#211c18\],
+button.bg-\[\#211c18\],
+a.bg-black,
+button.bg-black {
+  color: #ffffff !important;
+}
+
+.bg-\[\#211c18\] *,
+.bg-black * {
+  color: inherit;
+}
