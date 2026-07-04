@@ -6,19 +6,19 @@ const testimonials = [
     quote:
       "The fabric feels beautiful and the fit is incredibly considered. It looks polished without feeling overdressed.",
     name: "Ayesha K.",
-    location: "London",
+    location: "Mumbai",
   },
   {
     quote:
       "The abaya drapes so well and feels effortless to wear. Every detail feels refined and thoughtfully finished.",
     name: "Mariam R.",
-    location: "Dubai",
+    location: "Delhi",
   },
   {
     quote:
       "The hijabs are soft, lightweight, and easy to style. The colours are even more elegant in person.",
     name: "Sara H.",
-    location: "Manchester",
+    location: "Bangalore",
   },
 ];
 

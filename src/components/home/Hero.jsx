@@ -33,7 +33,7 @@ export default function Hero() {
   }, [emblaApi, updateSelectedIndex]);
 
   return (
-    <section className="relative overflow-hidden bg-[#aab9c5] pt-[35px]">
+    <section className="relative overflow-hidden bg-[#fdfdfd] pt-[35px]">
       <div ref={emblaRef} className="overflow-hidden">
         <div className="flex touch-pan-y">
           {heroSlides.map((slide) => (
