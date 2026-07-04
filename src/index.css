@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "Narin";
+  src: url("/fonts/Narin-Regular.otf") format("opentype");
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+
 @import "tailwindcss";
 
 html {
@@ -145,4 +153,61 @@ button.bg-black {
 .bg-\[\#211c18\] *,
 .bg-black * {
   color: inherit;
+}
+
+/* PDP only */
+.pdp-aab-font,
+.pdp-aab-font * {
+  font-family: "Narin", Arial, sans-serif;
+}
+
+.pdp-aab-font .haya-rich-content,
+.pdp-aab-font .haya-rich-content p,
+.pdp-aab-font .haya-rich-content li,
+.pdp-aab-font .haya-rich-content span {
+  font-family: "Narin", Arial, sans-serif !important;
+  font-size: 14px !important;
+  font-weight: 200 !important;
+  line-height: 1.8 !important;
+  letter-spacing: 0.003em !important;
+  color: #4f4944 !important;
+}
+
+.pdp-aab-font .haya-rich-content p {
+  margin: 0 0 18px !important;
+}
+
+.pdp-aab-font .haya-rich-content ul,
+.pdp-aab-font .haya-rich-content ol {
+  margin: 18px 0 0 !important;
+  padding-left: 18px !important;
+}
+
+.pdp-aab-font .haya-rich-content li {
+  margin: 0 0 13px !important;
+  padding-left: 7px !important;
+}
+
+.pdp-aab-font .haya-rich-content strong {
+  font-weight: 200 !important;
+  color: #4f4944 !important;
+}
+
+.pdp-aab-font .haya-rich-content h1,
+.pdp-aab-font .haya-rich-content h2,
+.pdp-aab-font .haya-rich-content h3 {
+  font-family: "Narin", Arial, sans-serif !important;
+  font-weight: 200 !important;
+  letter-spacing: 0.03em !important;
+  color: #211c18 !important;
+}
+
+@media (max-width: 1023px) {
+  .pdp-aab-font .haya-rich-content,
+  .pdp-aab-font .haya-rich-content p,
+  .pdp-aab-font .haya-rich-content li,
+  .pdp-aab-font .haya-rich-content span {
+    font-size: 14px !important;
+    line-height: 1.8 !important;
+  }
 }
