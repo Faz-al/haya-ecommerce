@@ -1,32 +1,35 @@
 import { Link } from "react-router-dom";
 
-import heroImage from "../../assets/images/hero.jpg";
-import heroOne from "../../assets/images/hero-1.png";
+import hijab from "../../assets/images/hijab.png";
+import abayas from "../../assets/images/abayas.png";
+import essentials from "../../assets/images/essentials.png";
+import NewIn from "../../assets/images/NewIn.png";
 import heroTwo from "../../assets/images/hero-2.png";
+
 
 const collections = [
   {
     title: "Hijabs",
     subtitle: "Soft everyday layers",
-    image: heroTwo,
+    image: hijab,
     href: "/category/hijabs",
   },
   {
     title: "Abayas",
     subtitle: "Fluid silhouettes",
-    image: heroOne,
+    image: abayas,
     href: "/category/abayas",
   },
   {
     title: "Essentials",
     subtitle: "Styling must-haves",
-    image: heroImage,
+    image: essentials,
     href: "/category/essentials-accessories",
   },
   {
     title: "New In",
     subtitle: "The latest edit",
-    image: heroOne,
+    image: NewIn,
     href: "/shop?sort=new-arrivals",
   },
   {
