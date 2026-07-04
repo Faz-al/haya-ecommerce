@@ -155,7 +155,7 @@ export default function Footer() {
         </div>
 
         <div className="mt-14 flex flex-col gap-4 border-t border-white/10 pt-7 text-[9px] uppercase tracking-[0.14em] text-white/35 sm:flex-row sm:items-center sm:justify-between">
-          <p>© 2026 AAB. All rights reserved.</p>
+          <p>© 2026 Acid House. All rights reserved.</p>
 
           <div className="flex flex-wrap gap-5">
             <a href="#" className="transition-colors hover:text-white">
