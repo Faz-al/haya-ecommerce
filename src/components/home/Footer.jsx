@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 
@@ -6,43 +7,166 @@ const groups = [
   {
     title: "Shop",
     links: [
-      "New Arrivals",
-      "Abayas",
-      "Hijabs",
-      "Sets",
-      "Bestsellers",
+      {
+        label: "Shop All",
+        to: "/shop",
+      },
+      {
+        label: "New Arrivals",
+        to: "/shop?sort=new-arrivals",
+      },
+      {
+        label: "Bestsellers",
+        to: "/shop?sort=bestsellers",
+      },
+      {
+        label: "Featured",
+        to: "/shop?sort=featured",
+      },
+      {
+        label: "Newest",
+        to: "/shop?sort=newest",
+      },
+    ],
+  },
+  {
+    title: "Categories",
+    links: [
+      {
+        label: "Abayas",
+        to: "/category/abayas",
+      },
+      {
+        label: "Hijabs",
+        to: "/category/hijabs",
+      },
+      {
+        label: "Clothing",
+        to: "/category/clothing",
+      },
+      {
+        label: "Essentials",
+        to: "/category/essentials",
+      },
+      {
+        label: "Collections",
+        to: "/category/collections",
+      },
+      {
+        label: "Sale",
+        to: "/shop?sort=price-low",
+      },
     ],
   },
   {
     title: "Customer Care",
     links: [
-      "Contact",
-      "Delivery",
-      "Returns",
-      "Size Guide",
-      "FAQs",
+      {
+        label: "Contact",
+        to: "/contact",
+      },
+      {
+        label: "Delivery",
+        to: "/delivery",
+      },
+      {
+        label: "Returns",
+        to: "/returns",
+      },
+      {
+        label: "Size Guide",
+        to: "/size-guide",
+      },
+      {
+        label: "FAQs",
+        to: "/faqs",
+      },
     ],
   },
   {
     title: "About",
     links: [
-      "Our Story",
-      "Journal",
-      "Stores",
-      "Careers",
-      "Privacy",
-    ],
-  },
-  {
-    title: "Follow",
-    links: [
-      "Instagram",
-      "Pinterest",
-      "TikTok",
-      "YouTube",
+      {
+        label: "Our Story",
+        to: "/about",
+      },
+      {
+        label: "Journal",
+        to: "/journal",
+      },
+      {
+        label: "Privacy",
+        to: "/privacy",
+      },
+      {
+        label: "Terms",
+        to: "/terms",
+      },
+      {
+        label: "Cookies",
+        to: "/cookies",
+      },
     ],
   },
 ];
+
+const socialLinks = [
+  {
+    label: "Instagram",
+    href: "https://www.instagram.com/",
+  },
+  {
+    label: "Pinterest",
+    href: "https://www.pinterest.com/",
+  },
+  {
+    label: "TikTok",
+    href: "https://www.tiktok.com/",
+  },
+  {
+    label: "YouTube",
+    href: "https://www.youtube.com/",
+  },
+];
+
+function scrollToTop() {
+  window.scrollTo({
+    top: 0,
+    behavior: "smooth",
+  });
+}
+
+function FooterLink({ link, className = "", onClick }) {
+  if (link.href) {
+    return (
+      <a
+        href={link.href}
+        target="_blank"
+        rel="noreferrer"
+        className={className}
+        onClick={onClick}
+      >
+        {link.label}
+      </a>
+    );
+  }
+
+  return (
+    <Link
+      to={link.to}
+      className={className}
+      onClick={() => {
+        scrollToTop();
+
+        if (onClick) {
+          onClick();
+        }
+      }}
+    >
+      {link.label}
+    </Link>
+  );
+}
 
 export default function Footer() {
   const [openIndex, setOpenIndex] = useState(null);
@@ -52,26 +176,27 @@ export default function Footer() {
       <div className="mx-auto max-w-[1600px] px-5 pb-8 pt-14 sm:px-8 sm:pt-16 lg:px-12 lg:pb-10 lg:pt-20">
         <div className="grid gap-14 lg:grid-cols-[1.1fr_2fr] lg:gap-24">
           <div>
-            <a
-              href="/"
+            <Link
+              to="/"
+              onClick={scrollToTop}
               className="font-serif text-[48px] italic leading-none tracking-[-0.06em] sm:text-[58px]"
             >
               haya
-            </a>
+            </Link>
 
             <p className="mt-6 max-w-[340px] text-[12px] leading-[1.8] text-white/55 sm:text-[13px]">
               Modern modest fashion shaped by thoughtful design, fluid
               silhouettes, and understated elegance.
             </p>
 
-            <div className="mt-8 flex items-center gap-5 text-[9px] uppercase tracking-[0.2em] text-white/65">
-              <a href="#" className="transition-colors hover:text-white">
-                Instagram
-              </a>
-
-              <a href="#" className="transition-colors hover:text-white">
-                Pinterest
-              </a>
+            <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-3 text-[9px] uppercase tracking-[0.2em] text-white/65">
+              {socialLinks.slice(0, 2).map((link) => (
+                <FooterLink
+                  key={link.label}
+                  link={link}
+                  className="transition-colors hover:text-white"
+                />
+              ))}
             </div>
           </div>
 
@@ -84,13 +209,11 @@ export default function Footer() {
 
                 <ul className="mt-6 space-y-4">
                   {group.links.map((link) => (
-                    <li key={link}>
-                      <a
-                        href="#"
+                    <li key={link.label}>
+                      <FooterLink
+                        link={link}
                         className="text-[12px] text-white/65 transition-colors hover:text-white"
-                      >
-                        {link}
-                      </a>
+                      />
                     </li>
                   ))}
                 </ul>
@@ -110,9 +233,7 @@ export default function Footer() {
               >
                 <button
                   type="button"
-                  onClick={() =>
-                    setOpenIndex(isOpen ? null : index)
-                  }
+                  onClick={() => setOpenIndex(isOpen ? null : index)}
                   className="flex w-full items-center justify-between py-5 text-left"
                 >
                   <span className="text-[9px] uppercase tracking-[0.22em] text-white/70">
@@ -137,13 +258,12 @@ export default function Footer() {
                       className="overflow-hidden pb-5"
                     >
                       {group.links.map((link) => (
-                        <li key={link} className="py-2">
-                          <a
-                            href="#"
-                            className="text-[12px] text-white/55"
-                          >
-                            {link}
-                          </a>
+                        <li key={link.label} className="py-2">
+                          <FooterLink
+                            link={link}
+                            className="text-[12px] text-white/55 transition-colors hover:text-white"
+                            onClick={() => setOpenIndex(null)}
+                          />
                         </li>
                       ))}
                     </motion.ul>
@@ -154,21 +274,43 @@ export default function Footer() {
           })}
         </div>
 
+        <div className="mt-10 flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-white/10 pt-7 text-[9px] uppercase tracking-[0.2em] text-white/45 lg:hidden">
+          {socialLinks.map((link) => (
+            <FooterLink
+              key={link.label}
+              link={link}
+              className="transition-colors hover:text-white"
+            />
+          ))}
+        </div>
+
         <div className="mt-14 flex flex-col gap-4 border-t border-white/10 pt-7 text-[9px] uppercase tracking-[0.14em] text-white/35 sm:flex-row sm:items-center sm:justify-between">
-          <p>© 2026 Acid House. All rights reserved.</p>
+          <p>© 2026 Haya. All rights reserved.</p>
 
           <div className="flex flex-wrap gap-5">
-            <a href="#" className="transition-colors hover:text-white">
+            <Link
+              to="/privacy"
+              onClick={scrollToTop}
+              className="transition-colors hover:text-white"
+            >
               Privacy
-            </a>
+            </Link>
 
-            <a href="#" className="transition-colors hover:text-white">
+            <Link
+              to="/terms"
+              onClick={scrollToTop}
+              className="transition-colors hover:text-white"
+            >
               Terms
-            </a>
+            </Link>
 
-            <a href="#" className="transition-colors hover:text-white">
+            <Link
+              to="/cookies"
+              onClick={scrollToTop}
+              className="transition-colors hover:text-white"
+            >
               Cookies
-            </a>
+            </Link>
           </div>
         </div>
       </div>
