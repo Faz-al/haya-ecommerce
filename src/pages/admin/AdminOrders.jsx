@@ -11,6 +11,7 @@ import {
   PackageSearch,
   RefreshCw,
   Search,
+  Trash2,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -71,9 +72,7 @@ function formatStatus(value) {
 
   return String(value)
     .replaceAll("_", " ")
-    .replace(/\b\w/g, (letter) =>
-      letter.toUpperCase()
-    );
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function getStatusClass(status) {
@@ -120,35 +119,22 @@ function StatusBadge({ value }) {
 }
 
 export default function AdminOrders() {
-  const [orders, setOrders] =
-    useState([]);
+  const [orders, setOrders] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
 
-  const [searchTerm, setSearchTerm] =
-    useState("");
+  const [orderStatus, setOrderStatus] = useState("all");
+  const [paymentStatus, setPaymentStatus] = useState("all");
+  const [fulfillmentStatus, setFulfillmentStatus] = useState("all");
 
-  const [orderStatus, setOrderStatus] =
-    useState("all");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [deletingOrderId, setDeletingOrderId] = useState("");
 
-  const [
-    paymentStatus,
-    setPaymentStatus,
-  ] = useState("all");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
-  const [
-    fulfillmentStatus,
-    setFulfillmentStatus,
-  ] = useState("all");
-
-  const [isLoading, setIsLoading] =
-    useState(true);
-
-  const [
-    isRefreshing,
-    setIsRefreshing,
-  ] = useState(false);
-
-  const [errorMessage, setErrorMessage] =
-    useState("");
+  const [deleteTargetOrder, setDeleteTargetOrder] = useState(null);
+const [deleteModalError, setDeleteModalError] = useState("");
 
   const loadOrders = useCallback(
     async ({ refresh = false } = {}) => {
@@ -159,6 +145,7 @@ export default function AdminOrders() {
       }
 
       setErrorMessage("");
+      setSuccessMessage("");
 
       try {
         let query = supabase
@@ -190,36 +177,19 @@ export default function AdminOrders() {
             ascending: false,
           });
 
-        if (
-          orderStatus !== "all"
-        ) {
-          query = query.eq(
-            "status",
-            orderStatus
-          );
+        if (orderStatus !== "all") {
+          query = query.eq("status", orderStatus);
         }
 
-        if (
-          paymentStatus !== "all"
-        ) {
-          query = query.eq(
-            "payment_status",
-            paymentStatus
-          );
+        if (paymentStatus !== "all") {
+          query = query.eq("payment_status", paymentStatus);
         }
 
-        if (
-          fulfillmentStatus !==
-          "all"
-        ) {
-          query = query.eq(
-            "fulfillment_status",
-            fulfillmentStatus
-          );
+        if (fulfillmentStatus !== "all") {
+          query = query.eq("fulfillment_status", fulfillmentStatus);
         }
 
-        const { data, error } =
-          await query;
+        const { data, error } = await query;
 
         if (error) {
           throw error;
@@ -227,25 +197,17 @@ export default function AdminOrders() {
 
         setOrders(data ?? []);
       } catch (error) {
-        console.error(
-          "Failed to load admin orders:",
-          error
-        );
+        console.error("Failed to load admin orders:", error);
 
         setErrorMessage(
-          error.message ||
-            "Orders could not be loaded."
+          error.message || "Orders could not be loaded."
         );
       } finally {
         setIsLoading(false);
         setIsRefreshing(false);
       }
     },
-    [
-      orderStatus,
-      paymentStatus,
-      fulfillmentStatus,
-    ]
+    [orderStatus, paymentStatus, fulfillmentStatus]
   );
 
   useEffect(() => {
@@ -253,10 +215,7 @@ export default function AdminOrders() {
   }, [loadOrders]);
 
   const filteredOrders = useMemo(() => {
-    const normalizedSearch =
-      searchTerm
-        .trim()
-        .toLowerCase();
+    const normalizedSearch = searchTerm.trim().toLowerCase();
 
     if (!normalizedSearch) {
       return orders;
@@ -271,13 +230,10 @@ export default function AdminOrders() {
         order.customer_phone,
       ];
 
-      return searchableValues.some(
-        (value) =>
-          String(value ?? "")
-            .toLowerCase()
-            .includes(
-              normalizedSearch
-            )
+      return searchableValues.some((value) =>
+        String(value ?? "")
+          .toLowerCase()
+          .includes(normalizedSearch)
       );
     });
   }, [orders, searchTerm]);
@@ -286,20 +242,13 @@ export default function AdminOrders() {
     return orders.reduce(
       (totals, order) => {
         totals.totalOrders += 1;
-        totals.revenue += Number(
-          order.total ?? 0
-        );
+        totals.revenue += Number(order.total ?? 0);
 
-        if (
-          order.status === "pending"
-        ) {
+        if (order.status === "pending") {
           totals.pending += 1;
         }
 
-        if (
-          order.fulfillment_status ===
-          "unfulfilled"
-        ) {
+        if (order.fulfillment_status === "unfulfilled") {
           totals.unfulfilled += 1;
         }
 
@@ -314,6 +263,59 @@ export default function AdminOrders() {
     );
   }, [orders]);
 
+ const handleDeleteOrder = (event, order) => {
+  event.preventDefault();
+  event.stopPropagation();
+
+  setDeleteTargetOrder(order);
+  setDeleteModalError("");
+  setErrorMessage("");
+  setSuccessMessage("");
+};
+
+const confirmDeleteOrder = async () => {
+  if (!deleteTargetOrder) return;
+
+  const order = deleteTargetOrder;
+  const orderLabel = order.order_number || "this order";
+
+  setDeletingOrderId(order.id);
+  setDeleteModalError("");
+  setErrorMessage("");
+  setSuccessMessage("");
+
+  try {
+    const { data, error } = await supabase.rpc("admin_delete_order", {
+      p_order_id: order.id,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data?.success) {
+      throw new Error(
+        data?.message || "The order could not be deleted."
+      );
+    }
+
+    setOrders((currentOrders) =>
+      currentOrders.filter((currentOrder) => currentOrder.id !== order.id)
+    );
+
+    setSuccessMessage(`${orderLabel} was deleted permanently.`);
+    setDeleteTargetOrder(null);
+  } catch (error) {
+    console.error("Failed to delete order:", error);
+
+    setDeleteModalError(
+      error.message || "The order could not be deleted."
+    );
+  } finally {
+    setDeletingOrderId("");
+  }
+};
+
   return (
     <div>
       <div className="flex flex-col gap-5 border-b border-black/10 pb-8 sm:flex-row sm:items-end sm:justify-between">
@@ -327,9 +329,8 @@ export default function AdminOrders() {
           </h1>
 
           <p className="mt-3 max-w-xl text-[10px] leading-6 text-[#766b63]">
-            Review customer orders,
-            payment states, fulfilment
-            progress and delivery details.
+            Review customer orders, payment states, fulfilment progress and
+            delivery details. Test orders can be permanently deleted.
           </p>
         </div>
 
@@ -346,11 +347,7 @@ export default function AdminOrders() {
           <RefreshCw
             size={14}
             strokeWidth={1.4}
-            className={
-              isRefreshing
-                ? "animate-spin"
-                : ""
-            }
+            className={isRefreshing ? "animate-spin" : ""}
           />
 
           Refresh
@@ -374,9 +371,7 @@ export default function AdminOrders() {
           </p>
 
           <p className="mt-3 font-serif text-[25px]">
-            {formatCurrency(
-              summary.revenue
-            )}
+            {formatCurrency(summary.revenue)}
           </p>
         </article>
 
@@ -413,11 +408,7 @@ export default function AdminOrders() {
             <input
               type="search"
               value={searchTerm}
-              onChange={(event) =>
-                setSearchTerm(
-                  event.target.value
-                )
-              }
+              onChange={(event) => setSearchTerm(event.target.value)}
               placeholder="Search order number, customer, email or phone"
               className="h-12 w-full border border-black/10 bg-[#f4f0eb] pl-11 pr-4 text-[10px] outline-none transition placeholder:text-[#938980] focus:border-black/40"
             />
@@ -425,71 +416,56 @@ export default function AdminOrders() {
 
           <select
             value={orderStatus}
-            onChange={(event) =>
-              setOrderStatus(
-                event.target.value
-              )
-            }
+            onChange={(event) => setOrderStatus(event.target.value)}
             className="h-12 border border-black/10 bg-[#f4f0eb] px-3 text-[9px] outline-none focus:border-black/40"
           >
-            {ORDER_STATUS_OPTIONS.map(
-              (status) => (
-                <option
-                  key={status}
-                  value={status}
-                >
-                  Order:{" "}
-                  {formatStatus(status)}
-                </option>
-              )
-            )}
+            {ORDER_STATUS_OPTIONS.map((status) => (
+              <option
+                key={status}
+                value={status}
+              >
+                Order: {formatStatus(status)}
+              </option>
+            ))}
           </select>
 
           <select
             value={paymentStatus}
-            onChange={(event) =>
-              setPaymentStatus(
-                event.target.value
-              )
-            }
+            onChange={(event) => setPaymentStatus(event.target.value)}
             className="h-12 border border-black/10 bg-[#f4f0eb] px-3 text-[9px] outline-none focus:border-black/40"
           >
-            {PAYMENT_STATUS_OPTIONS.map(
-              (status) => (
-                <option
-                  key={status}
-                  value={status}
-                >
-                  Payment:{" "}
-                  {formatStatus(status)}
-                </option>
-              )
-            )}
+            {PAYMENT_STATUS_OPTIONS.map((status) => (
+              <option
+                key={status}
+                value={status}
+              >
+                Payment: {formatStatus(status)}
+              </option>
+            ))}
           </select>
 
           <select
             value={fulfillmentStatus}
-            onChange={(event) =>
-              setFulfillmentStatus(
-                event.target.value
-              )
-            }
+            onChange={(event) => setFulfillmentStatus(event.target.value)}
             className="h-12 border border-black/10 bg-[#f4f0eb] px-3 text-[9px] outline-none focus:border-black/40"
           >
-            {FULFILLMENT_STATUS_OPTIONS.map(
-              (status) => (
-                <option
-                  key={status}
-                  value={status}
-                >
-                  Fulfilment:{" "}
-                  {formatStatus(status)}
-                </option>
-              )
-            )}
+            {FULFILLMENT_STATUS_OPTIONS.map((status) => (
+              <option
+                key={status}
+                value={status}
+              >
+                Fulfilment: {formatStatus(status)}
+              </option>
+            ))}
           </select>
         </div>
       </section>
+
+      {successMessage && (
+        <div className="mt-5 border border-[#5f7a5f]/20 bg-[#dde8dc] p-4 text-[10px] leading-5 text-[#355b39]">
+          {successMessage}
+        </div>
+      )}
 
       {isLoading ? (
         <div className="flex min-h-[320px] items-center justify-center">
@@ -539,141 +515,191 @@ export default function AdminOrders() {
             </h2>
 
             <p className="mt-3 text-[10px] leading-6 text-[#766b63]">
-              Try changing the search or
-              status filters.
+              Try changing the search or status filters.
             </p>
           </div>
         </div>
       ) : (
         <div className="mt-8 overflow-hidden border border-black/10 bg-[#eee8e1]">
-          <div className="hidden grid-cols-[1.1fr_1.25fr_0.85fr_0.9fr_0.9fr_0.7fr_30px] gap-4 border-b border-black/10 bg-[#e4ddd5] px-5 py-4 text-[7px] uppercase tracking-[0.16em] text-[#756a62] xl:grid">
+          <div className="hidden grid-cols-[1.1fr_1.25fr_0.85fr_0.9fr_0.9fr_0.7fr_110px] gap-4 border-b border-black/10 bg-[#e4ddd5] px-5 py-4 text-[7px] uppercase tracking-[0.16em] text-[#756a62] xl:grid">
             <span>Order</span>
             <span>Customer</span>
             <span>Order Status</span>
             <span>Payment</span>
             <span>Fulfilment</span>
             <span>Total</span>
-            <span />
+            <span>Actions</span>
           </div>
 
           <div className="divide-y divide-black/[0.08]">
-            {filteredOrders.map(
-              (order) => {
-                const customerEmail =
-                  order.customer_email ||
-                  order.email ||
-                  "No email";
+            {filteredOrders.map((order) => {
+              const customerEmail =
+                order.customer_email || order.email || "No email";
 
-                return (
-                  <Link
-                    key={order.id}
-                    to={`/admin/orders/${order.id}`}
-                    className="group grid gap-5 px-5 py-5 transition hover:bg-black/[0.025] xl:grid-cols-[1.1fr_1.25fr_0.85fr_0.9fr_0.9fr_0.7fr_30px] xl:items-center xl:gap-4"
-                  >
-                    <div>
-                      <p className="text-[9px] uppercase tracking-[0.12em]">
-                        {order.order_number ||
-                          "Order"}
+              const isDeleting = deletingOrderId === order.id;
+
+              return (
+                <Link
+                  key={order.id}
+                  to={`/admin/orders/${order.id}`}
+                  className="group grid gap-5 px-5 py-5 transition hover:bg-black/[0.025] xl:grid-cols-[1.1fr_1.25fr_0.85fr_0.9fr_0.9fr_0.7fr_110px] xl:items-center xl:gap-4"
+                >
+                  <div>
+                    <p className="text-[9px] uppercase tracking-[0.12em]">
+                      {order.order_number || "Order"}
+                    </p>
+
+                    <p className="mt-2 text-[8px] text-[#7a7068]">
+                      {formatDate(order.created_at)}
+                    </p>
+
+                    <p className="mt-1 text-[8px] text-[#7a7068]">
+                      {Number(order.item_count) || 0}{" "}
+                      {Number(order.item_count) === 1 ? "item" : "items"}
+                    </p>
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="truncate text-[9px]">
+                      {order.customer_name || "Customer"}
+                    </p>
+
+                    <p className="mt-2 truncate text-[8px] text-[#7a7068]">
+                      {customerEmail}
+                    </p>
+
+                    {order.customer_phone && (
+                      <p className="mt-1 truncate text-[8px] text-[#7a7068]">
+                        {order.customer_phone}
                       </p>
+                    )}
+                  </div>
 
-                      <p className="mt-2 text-[8px] text-[#7a7068]">
-                        {formatDate(
-                          order.created_at
-                        )}
-                      </p>
+                  <div>
+                    <p className="mb-2 text-[7px] uppercase tracking-[0.14em] text-[#81766e] xl:hidden">
+                      Order
+                    </p>
 
-                      <p className="mt-1 text-[8px] text-[#7a7068]">
-                        {Number(
-                          order.item_count
-                        ) || 0}{" "}
-                        {Number(
-                          order.item_count
-                        ) === 1
-                          ? "item"
-                          : "items"}
-                      </p>
-                    </div>
+                    <StatusBadge value={order.status} />
+                  </div>
 
-                    <div className="min-w-0">
-                      <p className="truncate text-[9px]">
-                        {order.customer_name ||
-                          "Customer"}
-                      </p>
+                  <div>
+                    <p className="mb-2 text-[7px] uppercase tracking-[0.14em] text-[#81766e] xl:hidden">
+                      Payment
+                    </p>
 
-                      <p className="mt-2 truncate text-[8px] text-[#7a7068]">
-                        {customerEmail}
-                      </p>
+                    <StatusBadge value={order.payment_status} />
+                  </div>
 
-                      {order.customer_phone && (
-                        <p className="mt-1 truncate text-[8px] text-[#7a7068]">
-                          {
-                            order.customer_phone
-                          }
-                        </p>
+                  <div>
+                    <p className="mb-2 text-[7px] uppercase tracking-[0.14em] text-[#81766e] xl:hidden">
+                      Fulfilment
+                    </p>
+
+                    <StatusBadge value={order.fulfillment_status} />
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-[7px] uppercase tracking-[0.14em] text-[#81766e] xl:hidden">
+                      Total
+                    </p>
+
+                    <p className="text-[10px]">
+                      {formatCurrency(order.total, order.currency)}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={(event) => handleDeleteOrder(event, order)}
+                      disabled={isDeleting}
+                      className="inline-flex min-h-10 items-center justify-center gap-1.5 border border-red-900/20 px-3 text-[7px] uppercase tracking-[0.14em] text-red-900 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isDeleting ? (
+                        <LoaderCircle
+                          size={12}
+                          strokeWidth={1.4}
+                          className="animate-spin"
+                        />
+                      ) : (
+                        <Trash2
+                          size={12}
+                          strokeWidth={1.4}
+                        />
                       )}
-                    </div>
 
-                    <div>
-                      <p className="mb-2 text-[7px] uppercase tracking-[0.14em] text-[#81766e] xl:hidden">
-                        Order
-                      </p>
-
-                      <StatusBadge
-                        value={
-                          order.status
-                        }
-                      />
-                    </div>
-
-                    <div>
-                      <p className="mb-2 text-[7px] uppercase tracking-[0.14em] text-[#81766e] xl:hidden">
-                        Payment
-                      </p>
-
-                      <StatusBadge
-                        value={
-                          order.payment_status
-                        }
-                      />
-                    </div>
-
-                    <div>
-                      <p className="mb-2 text-[7px] uppercase tracking-[0.14em] text-[#81766e] xl:hidden">
-                        Fulfilment
-                      </p>
-
-                      <StatusBadge
-                        value={
-                          order.fulfillment_status
-                        }
-                      />
-                    </div>
-
-                    <div>
-                      <p className="mb-2 text-[7px] uppercase tracking-[0.14em] text-[#81766e] xl:hidden">
-                        Total
-                      </p>
-
-                      <p className="text-[10px]">
-                        {formatCurrency(
-                          order.total,
-                          order.currency
-                        )}
-                      </p>
-                    </div>
+                      {isDeleting ? "Deleting" : "Delete"}
+                    </button>
 
                     <ChevronRight
                       size={17}
                       strokeWidth={1.3}
                       className="hidden text-[#776c64] transition group-hover:translate-x-1 xl:block"
                     />
-                  </Link>
-                );
-              }
-            )}
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         </div>
       )}
+
+
+      {deleteTargetOrder && (
+  <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/55 px-4">
+    <div className="w-full max-w-[460px] border border-black/10 bg-[#f2eee9] p-6 shadow-2xl sm:p-8">
+      <p className="text-[8px] uppercase tracking-[0.22em] text-[#8c443b]">
+        Confirm Delete
+      </p>
+
+      <h2 className="mt-4 font-serif text-[32px] leading-tight tracking-[-0.03em]">
+        Delete this order?
+      </h2>
+
+      <p className="mt-4 text-[10px] leading-6 text-[#6f655d]">
+        This will permanently remove{" "}
+        <span className="font-medium text-[#211c18]">
+          {deleteTargetOrder.order_number || "this order"}
+        </span>{" "}
+        and all its order items from the database. This action cannot be undone.
+      </p>
+
+      {deleteModalError && (
+        <p className="mt-5 border border-[#9b493f]/20 bg-[#9b493f]/5 p-4 text-[9px] leading-5 text-[#9b493f]">
+          {deleteModalError}
+        </p>
+      )}
+
+      <div className="mt-7 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        <button
+          type="button"
+          onClick={() => {
+            if (deletingOrderId) return;
+
+            setDeleteTargetOrder(null);
+            setDeleteModalError("");
+          }}
+          disabled={Boolean(deletingOrderId)}
+          className="border border-black/15 px-6 py-4 text-[8px] uppercase tracking-[0.17em] transition hover:border-black/40 disabled:opacity-50"
+        >
+          Keep Order
+        </button>
+
+        <button
+          type="button"
+          onClick={confirmDeleteOrder}
+          disabled={Boolean(deletingOrderId)}
+          className="bg-[#8c443b] px-6 py-4 text-[8px] uppercase tracking-[0.17em] text-white transition hover:bg-[#75372f] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {deletingOrderId ? "Deleting..." : "Delete Permanently"}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+
     </div>
   );
 }

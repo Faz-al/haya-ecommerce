@@ -23,12 +23,45 @@ import { supabase } from "../../lib/supabase";
 import RichTextEditor from "../../components/admin/RichTextEditor";
 
 function createSlug(value) {
-  return value
+  return String(value || "")
     .toLowerCase()
     .trim()
     .replace(/&/g, "and")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+async function createUniqueProductSlug(baseSlug, currentProductId) {
+  const fallbackSlug = "product";
+  const cleanBaseSlug = createSlug(baseSlug) || fallbackSlug;
+
+  let finalSlug = cleanBaseSlug;
+  let counter = 2;
+
+  while (true) {
+    let query = supabase
+      .from("products")
+      .select("id")
+      .eq("slug", finalSlug)
+      .limit(1);
+
+    if (currentProductId) {
+      query = query.neq("id", currentProductId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data || data.length === 0) {
+      return finalSlug;
+    }
+
+    finalSlug = `${cleanBaseSlug}-${counter}`;
+    counter += 1;
+  }
 }
 
 function groupCategories(categories) {
@@ -79,12 +112,22 @@ const initialFormData = {
   seoDescription: "",
 };
 
+const EDIT_PRODUCT_DRAFT_PREFIX = "haya-admin-product-edit-draft";
+
 export default function AdminProductEdit() {
   const { productId } = useParams();
   const navigate = useNavigate();
 
+  const editDraftKey = `${EDIT_PRODUCT_DRAFT_PREFIX}-${productId}`;
+
   const [formData, setFormData] =
     useState(initialFormData);
+
+    const [draftRestored, setDraftRestored] = useState(false);
+
+    const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+    const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
 
   const [originalProduct, setOriginalProduct] =
     useState(null);
@@ -226,6 +269,7 @@ export default function AdminProductEdit() {
       const data = productResponse.data;
 
       setOriginalProduct(data);
+      setSlugManuallyEdited(false);
 
       setCategories(
         categoriesResponse.data || []
@@ -238,60 +282,109 @@ export default function AdminProductEdit() {
         ).map((row) => row.category_id)
       );
 
-      setFormData({
-        name: data.name || "",
-        slug: data.slug || "",
+      const loadedCategoryIds =
+  (
+    productCategoriesResponse.data ||
+    []
+  ).map((row) => row.category_id);
 
-        shortDescription:
-          data.short_description || "",
+const loadedFormData = {
+  name: data.name || "",
+  slug: data.slug || "",
 
-        description:
-          data.description || "",
+  shortDescription:
+    data.short_description || "",
 
-        productType:
-          data.product_type || "Hijab",
+  description:
+    data.description || "",
 
-        vendor:
-          data.vendor || "Haya",
+  productType:
+    data.product_type || "Hijab",
 
-        basePrice:
-          data.base_price === null ||
-          data.base_price === undefined
-            ? ""
-            : String(data.base_price),
+  vendor:
+    data.vendor || "Haya",
 
-        compareAtPrice:
-          data.compare_at_price === null ||
-          data.compare_at_price ===
-            undefined
-            ? ""
-            : String(data.compare_at_price),
+  basePrice:
+    data.base_price === null ||
+    data.base_price === undefined
+      ? ""
+      : String(data.base_price),
 
-        currency:
-          data.currency || "INR",
+  compareAtPrice:
+    data.compare_at_price === null ||
+    data.compare_at_price === undefined
+      ? ""
+      : String(data.compare_at_price),
 
-        status:
-          data.status || "draft",
+  currency:
+    data.currency || "INR",
 
-        featured: Boolean(
-          data.is_featured ??
-            data.featured
-        ),
+  status:
+    data.status || "draft",
 
-        isNewArrival: Boolean(
-          data.is_new_arrival
-        ),
+  featured: Boolean(
+    data.is_featured ??
+      data.featured
+  ),
 
-        isBestseller: Boolean(
-          data.is_bestseller
-        ),
+  isNewArrival: Boolean(
+    data.is_new_arrival
+  ),
 
-        seoTitle:
-          data.seo_title || "",
+  isBestseller: Boolean(
+    data.is_bestseller
+  ),
 
-        seoDescription:
-          data.seo_description || "",
-      });
+  seoTitle:
+    data.seo_title || "",
+
+  seoDescription:
+    data.seo_description || "",
+};
+
+let nextFormData = loadedFormData;
+let nextCategoryIds = loadedCategoryIds;
+let restoredDraft = false;
+
+try {
+  const savedDraft = window.localStorage.getItem(editDraftKey);
+
+  if (savedDraft) {
+    const parsedDraft = JSON.parse(savedDraft);
+
+    if (parsedDraft?.formData) {
+      nextFormData = {
+        ...loadedFormData,
+        ...parsedDraft.formData,
+      };
+
+      restoredDraft = true;
+    }
+
+    if (Array.isArray(parsedDraft?.selectedCategoryIds)) {
+      nextCategoryIds = parsedDraft.selectedCategoryIds;
+      restoredDraft = true;
+    }
+
+    if (typeof parsedDraft?.slugManuallyEdited === "boolean") {
+      setSlugManuallyEdited(parsedDraft.slugManuallyEdited);
+    }
+  }
+} catch (error) {
+  console.error("Failed to restore product edit draft:", error);
+}
+
+setSelectedCategoryIds(nextCategoryIds);
+setFormData(nextFormData);
+setDraftRestored(restoredDraft);
+setHasUnsavedChanges(restoredDraft);
+
+if (restoredDraft) {
+  setMessageType("success");
+  setMessage(
+    "Your unsaved product edits were restored. Review and save when ready."
+  );
+}
     } catch (error) {
       console.error(
         "Failed to load product:",
@@ -305,46 +398,104 @@ export default function AdminProductEdit() {
     } finally {
       setLoading(false);
     }
-  }, [productId]);
+}, [editDraftKey, productId]);
 
   useEffect(() => {
     fetchProduct();
   }, [fetchProduct]);
 
+  useEffect(() => {
+  if (loading || loadError || !originalProduct || !hasUnsavedChanges) {
+  return;
+}
+
+  const hasUsefulDraft =
+    formData.name.trim() ||
+    formData.slug.trim() ||
+    formData.shortDescription.trim() ||
+    formData.description.trim() ||
+    formData.basePrice !== "" ||
+    selectedCategoryIds.length > 0;
+
+  if (!hasUsefulDraft) {
+    return;
+  }
+
+  const timeoutId = window.setTimeout(() => {
+    try {
+      window.localStorage.setItem(
+        editDraftKey,
+        JSON.stringify({
+          formData,
+          selectedCategoryIds,
+          slugManuallyEdited,
+          savedAt: new Date().toISOString(),
+        })
+      );
+    } catch (error) {
+      console.error("Failed to autosave product edit draft:", error);
+    }
+  }, 500);
+
+  return () => window.clearTimeout(timeoutId);
+}, [
+  editDraftKey,
+  formData,
+  selectedCategoryIds,
+  slugManuallyEdited,
+  loading,
+  loadError,
+  originalProduct,
+  hasUnsavedChanges,
+]);
+
   const handleChange = (event) => {
-    const {
-      name,
-      value,
-      type,
-      checked,
-    } = event.target;
+  const {
+    name,
+    value,
+    type,
+    checked,
+  } = event.target;
 
-    setMessage("");
+  setMessage("");
 
-    setFormData((current) => ({
+  setHasUnsavedChanges(true);
+
+  setFormData((current) => {
+    const nextValue =
+      type === "checkbox" ? checked : value;
+
+    const nextData = {
       ...current,
-      [name]:
-        type === "checkbox"
-          ? checked
-          : value,
-    }));
-  };
+      [name]: nextValue,
+    };
+
+    if (name === "name" && !slugManuallyEdited) {
+      nextData.slug = createSlug(value);
+    }
+
+    return nextData;
+  });
+};
 
   const handleSlugChange = (event) => {
-    setFormData((current) => ({
-      ...current,
-      slug: createSlug(
-        event.target.value
-      ),
-    }));
+  setSlugManuallyEdited(true);
+  setHasUnsavedChanges(true);
 
-    setMessage("");
-  };
+  setFormData((current) => ({
+    ...current,
+    slug: createSlug(event.target.value),
+  }));
+
+  setMessage("");
+};
 
   const handleCategoryToggle = (
     categoryId
   ) => {
     setMessage("");
+
+    setHasUnsavedChanges(true);
 
     setSelectedCategoryIds(
       (current) => {
@@ -479,11 +630,14 @@ export default function AdminProductEdit() {
         publishedAt = null;
       }
 
-      const productUpdate = {
-        name: formData.name.trim(),
-        slug: createSlug(
-          formData.slug
-        ),
+     const safeSlug = await createUniqueProductSlug(
+  formData.slug || formData.name,
+  productId
+);
+
+const productUpdate = {
+  name: formData.name.trim(),
+  slug: safeSlug,
 
         short_description:
           formData.shortDescription.trim() ||
@@ -560,6 +714,15 @@ export default function AdminProductEdit() {
 
       await saveProductCategories();
 
+      try {
+  window.localStorage.removeItem(editDraftKey);
+} catch (error) {
+  console.error("Failed to clear product edit draft:", error);
+}
+
+setDraftRestored(false);
+setHasUnsavedChanges(false);
+
       setOriginalProduct((current) => ({
         ...current,
         ...updatedProduct,
@@ -569,11 +732,18 @@ export default function AdminProductEdit() {
         ...current,
         slug: updatedProduct.slug,
       }));
+setMessageType("success");
 
-      setMessageType("success");
-      setMessage(
-        `${updatedProduct.name} was saved successfully.`
-      );
+if (updatedProduct.slug !== createSlug(formData.slug)) {
+  setMessage(
+    `${updatedProduct.name} was saved successfully. The URL slug was changed to "${updatedProduct.slug}" because the previous slug was already used.`
+  );
+} else {
+  setMessage(
+    `${updatedProduct.name} was saved successfully.`
+  );
+}
+
     } catch (error) {
       console.error(
         "Product update failed:",
@@ -776,7 +946,7 @@ export default function AdminProductEdit() {
     placeholder="Describe the fabric, feel, styling, care instructions and product details."
     onChange={(html) => {
       setMessage("");
-
+        setHasUnsavedChanges(true);
       setFormData((current) => ({
         ...current,
         description: html,
@@ -1160,6 +1330,32 @@ export default function AdminProductEdit() {
           </section>
 
           <button
+  type="button"
+  onClick={() => {
+    const confirmed = window.confirm(
+      "Clear the saved unsaved edits for this product?"
+    );
+
+    if (!confirmed) return;
+
+    try {
+      window.localStorage.removeItem(editDraftKey);
+    } catch (error) {
+      console.error("Failed to clear product edit draft:", error);
+    }
+
+    setDraftRestored(false);
+    
+    setHasUnsavedChanges(false);
+    setMessage("");
+    fetchProduct();
+  }}
+  className="flex min-h-11 w-full items-center justify-center border border-black/15 px-6 text-[8px] uppercase tracking-[0.18em] transition hover:bg-white"
+>
+  Clear Saved Edits
+</button>
+
+          <button
             type="submit"
             disabled={
               isSubmitting || !canSubmit
@@ -1205,6 +1401,12 @@ export default function AdminProductEdit() {
               {productId}
             </p>
           </section>
+
+          {draftRestored && (
+  <p className="border border-[#55705a]/20 bg-[#55705a]/5 p-4 text-[9px] leading-5 text-[#45604b]">
+    Unsaved edits were restored from this browser. Save the product to make them permanent.
+  </p>
+)}
         </aside>
       </form>
     </>

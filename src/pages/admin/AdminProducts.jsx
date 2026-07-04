@@ -5,6 +5,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Trash2,
 } from "lucide-react";
 import {
   useCallback,
@@ -12,7 +13,10 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Link } from "react-router-dom";
+import {
+  Link,
+  useNavigate,
+} from "react-router-dom";
 
 import { supabase } from "../../lib/supabase";
 
@@ -30,7 +34,11 @@ function formatStatus(status) {
 }
 
 function createCopySlug(slug) {
-  const cleanSlug = String(slug || "product").replace(/-copy-\d+$/, "");
+  const cleanSlug = String(slug || "product")
+    .trim()
+    .toLowerCase()
+    .replace(/-copy-\d+$/, "");
+
   return `${cleanSlug}-copy-${Date.now()}`;
 }
 
@@ -45,10 +53,15 @@ function removeSystemFields(row) {
 }
 
 export default function AdminProducts() {
+  const navigate = useNavigate();
+
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
+
   const [duplicatingId, setDuplicatingId] = useState("");
+  const [deletingId, setDeletingId] = useState("");
+
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
@@ -172,7 +185,13 @@ export default function AdminProducts() {
   }, [products, searchTerm, categoryFilter, statusFilter]);
 
   const statusOptions = useMemo(() => {
-    return [...new Set(products.map((product) => product.status).filter(Boolean))];
+    return [
+      ...new Set(
+        products
+          .map((product) => product.status)
+          .filter(Boolean)
+      ),
+    ];
   }, [products]);
 
   const handleDuplicateProduct = async (event, productId) => {
@@ -300,7 +319,7 @@ export default function AdminProducts() {
             ...removeSystemFields(variant),
             product_id: newProductId,
             color_id: oldColorId ? colorIdMap[oldColorId] || null : null,
-            sku: variant.sku ? `${variant.sku}-COPY` : null,
+            sku: variant.sku ? `${variant.sku}-COPY-${Date.now()}` : null,
           };
         }) || [];
 
@@ -328,12 +347,84 @@ export default function AdminProducts() {
 
       setSuccessMessage("Product duplicated as a draft.");
       await fetchProducts();
+
+      navigate(`/admin/products/${newProductId}`);
     } catch (error) {
       console.error("Failed to duplicate product:", error);
 
       setErrorMessage(error.message || "Unable to duplicate product.");
     } finally {
       setDuplicatingId("");
+    }
+  };
+
+  const handleDeleteProduct = async (event, product) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const productName = product?.name || "this product";
+
+    const confirmed = window.confirm(
+      `Delete "${productName}" permanently?\n\nThis will remove the product, variants, colours, category connections and image records from the database. This action cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    setDeletingId(product.id);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const deleteSteps = [
+        supabase
+          .from("product_categories")
+          .delete()
+          .eq("product_id", product.id),
+
+        supabase
+          .from("product_images")
+          .delete()
+          .eq("product_id", product.id),
+
+        supabase
+          .from("product_variants")
+          .delete()
+          .eq("product_id", product.id),
+
+        supabase
+          .from("product_colors")
+          .delete()
+          .eq("product_id", product.id),
+      ];
+
+      for (const step of deleteSteps) {
+        const { error } = await step;
+
+        if (error) {
+          throw error;
+        }
+      }
+
+      const { error: productDeleteError } = await supabase
+        .from("products")
+        .delete()
+        .eq("id", product.id);
+
+      if (productDeleteError) {
+        throw productDeleteError;
+      }
+
+      setSuccessMessage(`"${productName}" deleted permanently.`);
+
+      setProducts((currentProducts) =>
+        currentProducts.filter((item) => item.id !== product.id)
+      );
+    } catch (error) {
+      console.error("Failed to delete product:", error);
+
+      setErrorMessage(error.message || "Unable to delete product.");
+    } finally {
+      setDeletingId("");
     }
   };
 
@@ -350,7 +441,7 @@ export default function AdminProducts() {
           </h1>
 
           <p className="mt-4 text-[11px] text-[#71665e]">
-            Search, filter, duplicate and manage Haya products.
+            Search, filter, duplicate, delete and manage Haya products.
           </p>
         </div>
 
@@ -404,7 +495,10 @@ export default function AdminProducts() {
           <option value="all">All Categories</option>
 
           {categories.map((category) => (
-            <option key={category.id} value={category.id}>
+            <option
+              key={category.id}
+              value={category.id}
+            >
               {category.name}
             </option>
           ))}
@@ -418,7 +512,10 @@ export default function AdminProducts() {
           <option value="all">All Statuses</option>
 
           {statusOptions.map((status) => (
-            <option key={status} value={status}>
+            <option
+              key={status}
+              value={status}
+            >
               {formatStatus(status)}
             </option>
           ))}
@@ -534,8 +631,9 @@ export default function AdminProducts() {
               sortedImages[0];
 
             const activeVariants =
-              product.product_variants?.filter((variant) => variant.is_active) ||
-              [];
+              product.product_variants?.filter(
+                (variant) => variant.is_active
+              ) || [];
 
             const totalStock = activeVariants.reduce(
               (total, variant) =>
@@ -563,12 +661,17 @@ export default function AdminProducts() {
               placementBadges.push("Bestseller");
             }
 
+            const isDuplicating = duplicatingId === product.id;
+            const isDeleting = deletingId === product.id;
+
             return (
               <Link
                 key={product.id}
                 to={`/admin/products/${product.id}`}
-className="group grid gap-4 border border-black/10 bg-[#eee7df] p-4 transition hover:bg-white/60 sm:grid-cols-[105px_minmax(0,1fr)]"              >
-<div className="h-[260px] w-full overflow-hidden bg-[#ddd4cc] sm:h-[140px] sm:w-[105px] sm:shrink-0">                  {primaryImage?.public_url ? (
+                className="group grid gap-4 border border-black/10 bg-[#eee7df] p-4 transition hover:bg-white/60 sm:grid-cols-[105px_minmax(0,1fr)]"
+              >
+                <div className="h-[260px] w-full overflow-hidden bg-[#ddd4cc] sm:h-[140px] sm:w-[105px] sm:shrink-0">
+                  {primaryImage?.public_url ? (
                     <img
                       src={primaryImage.public_url}
                       alt={primaryImage.alt_text || product.name}
@@ -576,7 +679,10 @@ className="group grid gap-4 border border-black/10 bg-[#eee7df] p-4 transition h
                     />
                   ) : (
                     <div className="flex h-full items-center justify-center text-[#81766e]">
-                      <ImageOff size={21} strokeWidth={1.2} />
+                      <ImageOff
+                        size={21}
+                        strokeWidth={1.2}
+                      />
                     </div>
                   )}
                 </div>
@@ -642,6 +748,7 @@ className="group grid gap-4 border border-black/10 bg-[#eee7df] p-4 transition h
                         <p className="text-[7px] uppercase tracking-[0.17em]">
                           Stock
                         </p>
+
                         <p className="mt-1 text-[10px] text-[#211c18]">
                           {totalStock}
                         </p>
@@ -651,30 +758,51 @@ className="group grid gap-4 border border-black/10 bg-[#eee7df] p-4 transition h
                         <p className="text-[7px] uppercase tracking-[0.17em]">
                           Variants
                         </p>
+
                         <p className="mt-1 text-[10px] text-[#211c18]">
                           {activeVariants.length}
                         </p>
                       </div>
                     </div>
 
-                    <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="mt-3 flex flex-col gap-3">
                       <p className="text-[11px]">
                         {formatCurrency(product.base_price, product.currency)}
                       </p>
 
-                      <button
-                        type="button"
-                        onClick={(event) =>
-                          handleDuplicateProduct(event, product.id)
-                        }
-                        disabled={duplicatingId === product.id}
-                        className="flex h-9 w-full items-center justify-center gap-1.5 border border-black/15 px-3 text-[7px] uppercase tracking-[0.15em] transition hover:bg-white disabled:opacity-50 sm:w-auto"
-                      >
-                        <Copy size={12} strokeWidth={1.3} />
-                        {duplicatingId === product.id
-                          ? "Copying"
-                          : "Duplicate"}
-                      </button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={(event) =>
+                            handleDuplicateProduct(event, product.id)
+                          }
+                          disabled={isDuplicating || isDeleting}
+                         className="flex h-9 min-w-0 items-center justify-center gap-1 border border-black/15 px-2 text-[7px] uppercase tracking-[0.12em] transition hover:bg-white disabled:opacity-50"
+                        >
+                          <Copy
+                            size={12}
+                            strokeWidth={1.3}
+                          />
+
+                          {isDuplicating ? "Copying" : "Duplicate"}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(event) =>
+                            handleDeleteProduct(event, product)
+                          }
+                          disabled={isDeleting || isDuplicating}
+                          className="flex h-9 min-w-0 items-center justify-center gap-1 border border-red-900/20 px-2 text-[7px] uppercase tracking-[0.12em] text-red-900 transition hover:bg-red-50 disabled:opacity-50"
+                        >
+                          <Trash2
+                            size={12}
+                            strokeWidth={1.3}
+                          />
+
+                          {isDeleting ? "Deleting" : "Delete"}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

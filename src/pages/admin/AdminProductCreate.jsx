@@ -18,12 +18,39 @@ import { useAuth } from "../../context/AuthContext";
 import RichTextEditor from "../../components/admin/RichTextEditor";
 
 function createSlug(value) {
-  return value
+  return String(value || "")
     .toLowerCase()
     .trim()
     .replace(/&/g, "and")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+async function createUniqueProductSlug(baseSlug) {
+  const fallbackSlug = "product";
+  const cleanBaseSlug = createSlug(baseSlug) || fallbackSlug;
+
+  let finalSlug = cleanBaseSlug;
+  let counter = 2;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("products")
+      .select("id")
+      .eq("slug", finalSlug)
+      .limit(1);
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data || data.length === 0) {
+      return finalSlug;
+    }
+
+    finalSlug = `${cleanBaseSlug}-${counter}`;
+    counter += 1;
+  }
 }
 
 function groupCategories(categories) {
@@ -50,84 +77,136 @@ function groupCategories(categories) {
   }));
 }
 
+const initialFormData = {
+  name: "",
+  slug: "",
+
+  shortDescription: "",
+  description: "",
+
+  productType: "Hijab",
+  vendor: "Haya",
+
+  basePrice: "",
+  compareAtPrice: "",
+  currency: "INR",
+
+  status: "draft",
+
+  featured: false,
+  isNewArrival: false,
+  isBestseller: false,
+
+  seoTitle: "",
+  seoDescription: "",
+};
+
+const CREATE_PRODUCT_DRAFT_KEY = "haya-admin-product-create-draft";
+
 export default function AdminProductCreate() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const [formData, setFormData] =
-    useState({
-      name: "",
-      slug: "",
+  const [formData, setFormData] = useState(initialFormData);
 
-      shortDescription: "",
-      description: "",
+  const [categories, setCategories] = useState([]);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
 
-      productType: "Hijab",
-      vendor: "Haya",
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [slugEdited, setSlugEdited] = useState(false);
 
-      basePrice: "",
-      compareAtPrice: "",
-      currency: "INR",
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("error");
 
-      status: "draft",
 
-      featured: false,
-      isNewArrival: false,
-      isBestseller: false,
+  useEffect(() => {
+  try {
+    const savedDraft = window.localStorage.getItem(CREATE_PRODUCT_DRAFT_KEY);
 
-      seoTitle: "",
-      seoDescription: "",
-    });
+    if (!savedDraft) return;
 
-  const [
-    categories,
-    setCategories,
-  ] = useState([]);
+    const parsedDraft = JSON.parse(savedDraft);
 
-  const [
-    selectedCategoryIds,
-    setSelectedCategoryIds,
-  ] = useState([]);
+    if (parsedDraft?.formData) {
+      setFormData((current) => ({
+        ...current,
+        ...parsedDraft.formData,
+      }));
+    }
 
-  const [
-    categoriesLoading,
-    setCategoriesLoading,
-  ] = useState(true);
+    if (Array.isArray(parsedDraft?.selectedCategoryIds)) {
+      setSelectedCategoryIds(parsedDraft.selectedCategoryIds);
+    }
 
-  const [slugEdited, setSlugEdited] =
-    useState(false);
+    if (typeof parsedDraft?.slugEdited === "boolean") {
+      setSlugEdited(parsedDraft.slugEdited);
+    }
 
-  const [isSubmitting, setIsSubmitting] =
-    useState(false);
+    setMessageType("success");
+    setMessage(
+      "Your unsaved product draft was restored. Continue editing and save when ready."
+    );
+  } catch (error) {
+    console.error("Failed to restore product draft:", error);
+  }
+}, []);
 
-  const [message, setMessage] =
-    useState("");
+
+useEffect(() => {
+  const hasUsefulDraft =
+    formData.name.trim() ||
+    formData.slug.trim() ||
+    formData.shortDescription.trim() ||
+    formData.description.trim() ||
+    formData.basePrice !== "" ||
+    selectedCategoryIds.length > 0;
+
+  if (!hasUsefulDraft) return;
+
+  const timeoutId = window.setTimeout(() => {
+    try {
+      window.localStorage.setItem(
+        CREATE_PRODUCT_DRAFT_KEY,
+        JSON.stringify({
+          formData,
+          selectedCategoryIds,
+          slugEdited,
+          savedAt: new Date().toISOString(),
+        })
+      );
+    } catch (error) {
+      console.error("Failed to autosave product draft:", error);
+    }
+  }, 500);
+
+  return () => window.clearTimeout(timeoutId);
+}, [formData, selectedCategoryIds, slugEdited]);
 
   useEffect(() => {
     async function loadCategories() {
       setCategoriesLoading(true);
 
       try {
-        const { data, error } =
-          await supabase
-            .from("categories")
-            .select(
-              `
-                id,
-                parent_id,
-                name,
-                slug,
-                position,
-                is_active
-              `
-            )
-            .eq("is_active", true)
-            .order("position", {
-              ascending: true,
-            })
-            .order("name", {
-              ascending: true,
-            });
+        const { data, error } = await supabase
+          .from("categories")
+          .select(
+            `
+              id,
+              parent_id,
+              name,
+              slug,
+              position,
+              is_active
+            `
+          )
+          .eq("is_active", true)
+          .order("position", {
+            ascending: true,
+          })
+          .order("name", {
+            ascending: true,
+          });
 
         if (error) {
           throw error;
@@ -140,6 +219,7 @@ export default function AdminProductCreate() {
           error
         );
 
+        setMessageType("error");
         setMessage(
           error.message ||
             "Categories could not be loaded."
@@ -158,10 +238,10 @@ export default function AdminProductCreate() {
   );
 
   const canSubmit = useMemo(() => {
-    return (
+    return Boolean(
       formData.name.trim() &&
-      formData.slug.trim() &&
-      formData.basePrice !== ""
+        formData.slug.trim() &&
+        formData.basePrice !== ""
     );
   }, [
     formData.name,
@@ -180,20 +260,16 @@ export default function AdminProductCreate() {
     setMessage("");
 
     setFormData((current) => {
+      const nextValue =
+        type === "checkbox" ? checked : value;
+
       const updatedData = {
         ...current,
-        [name]:
-          type === "checkbox"
-            ? checked
-            : value,
+        [name]: nextValue,
       };
 
-      if (
-        name === "name" &&
-        !slugEdited
-      ) {
-        updatedData.slug =
-          createSlug(value);
+      if (name === "name" && !slugEdited) {
+        updatedData.slug = createSlug(value);
       }
 
       return updatedData;
@@ -202,44 +278,33 @@ export default function AdminProductCreate() {
 
   const handleSlugChange = (event) => {
     setSlugEdited(true);
+    setMessage("");
 
     setFormData((current) => ({
       ...current,
-      slug: createSlug(
-        event.target.value
-      ),
+      slug: createSlug(event.target.value),
     }));
-
-    setMessage("");
   };
 
-  const handleCategoryToggle = (
-    categoryId
-  ) => {
+  const handleCategoryToggle = (categoryId) => {
     setMessage("");
 
-    setSelectedCategoryIds(
-      (current) => {
-        if (
-          current.includes(categoryId)
-        ) {
-          return current.filter(
-            (id) => id !== categoryId
-          );
-        }
-
-        return [
-          ...current,
-          categoryId,
-        ];
+    setSelectedCategoryIds((current) => {
+      if (current.includes(categoryId)) {
+        return current.filter((id) => id !== categoryId);
       }
-    );
+
+      return [...current, categoryId];
+    });
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
 
     if (isSubmitting) return;
+
+    setMessage("");
+    setMessageType("error");
 
     if (!canSubmit) {
       setMessage(
@@ -248,9 +313,7 @@ export default function AdminProductCreate() {
       return;
     }
 
-    const basePrice = Number(
-      formData.basePrice
-    );
+    const basePrice = Number(formData.basePrice);
 
     const compareAtPrice =
       formData.compareAtPrice === ""
@@ -291,14 +354,17 @@ export default function AdminProductCreate() {
     }
 
     setIsSubmitting(true);
-    setMessage("");
 
     try {
+      const requestedSlug = createSlug(
+        formData.slug || formData.name
+      );
+
+      const safeSlug = await createUniqueProductSlug(requestedSlug);
+
       const productInsert = {
         name: formData.name.trim(),
-        slug: createSlug(
-          formData.slug
-        ),
+        slug: safeSlug,
 
         short_description:
           formData.shortDescription.trim() ||
@@ -317,8 +383,7 @@ export default function AdminProductCreate() {
           "Haya",
 
         base_price: basePrice,
-        compare_at_price:
-          compareAtPrice,
+        compare_at_price: compareAtPrice,
         currency: formData.currency,
 
         status: formData.status,
@@ -329,10 +394,8 @@ export default function AdminProductCreate() {
          */
         featured: formData.featured,
         is_featured: formData.featured,
-        is_new_arrival:
-          formData.isNewArrival,
-        is_bestseller:
-          formData.isBestseller,
+        is_new_arrival: formData.isNewArrival,
+        is_bestseller: formData.isBestseller,
 
         featured_position: 0,
         new_arrival_position: 0,
@@ -364,29 +427,21 @@ export default function AdminProductCreate() {
         .single();
 
       if (error) {
-        if (
-          error.code === "23505"
-        ) {
+        if (error.code === "23505") {
           throw new Error(
-            "A product with this slug already exists."
+            "A product with this slug already exists. Please try a different product title or slug."
           );
         }
 
         throw error;
       }
 
-      if (
-        selectedCategoryIds.length > 0
-      ) {
+      if (selectedCategoryIds.length > 0) {
         const categoryRows =
-          selectedCategoryIds.map(
-            (categoryId) => ({
-              product_id:
-                createdProduct.id,
-              category_id:
-                categoryId,
-            })
-          );
+          selectedCategoryIds.map((categoryId) => ({
+            product_id: createdProduct.id,
+            category_id: categoryId,
+          }));
 
         const {
           error: categoryError,
@@ -399,21 +454,35 @@ export default function AdminProductCreate() {
         }
       }
 
-      navigate(
-        `/admin/products/${createdProduct.id}`,
-        {
-          replace: true,
-          state: {
-            message: `${createdProduct.name} was created successfully. You can now add colours, sizes, images and inventory.`,
-          },
-        }
-      );
+      const slugMessage =
+        createdProduct.slug !== requestedSlug
+          ? ` The URL slug was changed to "${createdProduct.slug}" because the previous slug was already used.`
+          : "";
+
+      try {
+  window.localStorage.removeItem(CREATE_PRODUCT_DRAFT_KEY);
+} catch (error) {
+  console.error("Failed to clear product draft:", error);
+}
+
+navigate(
+  `/admin/products/${createdProduct.id}`,
+  {
+    replace: true,
+    state: {
+      message: `${createdProduct.name} was created successfully.${slugMessage} You can now add colours, sizes, images and inventory.`,
+    },
+  }
+);
+
+
     } catch (error) {
       console.error(
         "Product creation failed:",
         error
       );
 
+      setMessageType("error");
       setMessage(
         error.message ||
           "The product could not be created."
@@ -454,6 +523,14 @@ export default function AdminProductCreate() {
 
       <form
         onSubmit={handleSubmit}
+        onKeyDown={(event) => {
+          if (
+            event.key === "Enter" &&
+            event.target.tagName !== "TEXTAREA"
+          ) {
+            event.preventDefault();
+          }
+        }}
         className="mt-8 grid gap-8 xl:grid-cols-[1fr_340px]"
       >
         <div className="space-y-8">
@@ -496,8 +573,15 @@ export default function AdminProductCreate() {
 
                 <p className="mt-2 text-[8px] text-[#81766e]">
                   Product URL: /product/
-                  {formData.slug ||
-                    "product-slug"}
+                  {formData.slug || "product-slug"}
+                </p>
+
+                <p className="mt-1 text-[8px] leading-5 text-[#81766e]">
+                  If this slug is already used, Haya will automatically create a safe version like{" "}
+                  <span className="font-medium text-[#312b27]">
+                    {formData.slug || "product-slug"}-2
+                  </span>
+                  .
                 </p>
               </div>
 
@@ -508,9 +592,7 @@ export default function AdminProductCreate() {
 
                 <textarea
                   name="shortDescription"
-                  value={
-                    formData.shortDescription
-                  }
+                  value={formData.shortDescription}
                   onChange={handleChange}
                   rows={3}
                   placeholder="A short description shown near the product title."
@@ -519,28 +601,28 @@ export default function AdminProductCreate() {
               </div>
 
               <div>
-  <label className="block text-[8px] uppercase tracking-[0.17em]">
-    Full Description
-  </label>
+                <label className="block text-[8px] uppercase tracking-[0.17em]">
+                  Full Description
+                </label>
 
-  <RichTextEditor
-    value={formData.description}
-    placeholder="Describe the fabric, feel, styling, care instructions and product details."
-    onChange={(html) => {
-      setMessage("");
+                <RichTextEditor
+                  value={formData.description}
+                  placeholder="Describe the fabric, feel, styling, care instructions and product details."
+                  onChange={(html) => {
+                    setMessage("");
 
-      setFormData((current) => ({
-        ...current,
-        description: html,
-      }));
-    }}
-  />
+                    setFormData((current) => ({
+                      ...current,
+                      description: html,
+                    }));
+                  }}
+                />
 
-  <p className="mt-2 text-[8px] leading-5 text-[#81766e]">
-    Use the toolbar to add headings, bold text, italic text,
-    lists, links and images.
-  </p>
-</div>
+                <p className="mt-2 text-[8px] leading-5 text-[#81766e]">
+                  Use the toolbar to add headings, bold text, italic text,
+                  lists, links and images.
+                </p>
+              </div>
             </div>
           </section>
 
@@ -561,9 +643,7 @@ export default function AdminProductCreate() {
                   step="0.01"
                   type="number"
                   name="basePrice"
-                  value={
-                    formData.basePrice
-                  }
+                  value={formData.basePrice}
                   onChange={handleChange}
                   placeholder="158.00"
                   className="mt-3 h-13 w-full border border-black/15 bg-[#f2eee9] px-4 text-[11px] outline-none transition focus:border-black/50"
@@ -580,9 +660,7 @@ export default function AdminProductCreate() {
                   step="0.01"
                   type="number"
                   name="compareAtPrice"
-                  value={
-                    formData.compareAtPrice
-                  }
+                  value={formData.compareAtPrice}
                   onChange={handleChange}
                   placeholder="199.00"
                   className="mt-3 h-13 w-full border border-black/15 bg-[#f2eee9] px-4 text-[11px] outline-none transition focus:border-black/50"
@@ -596,9 +674,7 @@ export default function AdminProductCreate() {
 
                 <select
                   name="currency"
-                  value={
-                    formData.currency
-                  }
+                  value={formData.currency}
                   onChange={handleChange}
                   className="mt-3 h-13 w-full border border-black/15 bg-[#f2eee9] px-4 text-[11px] outline-none transition focus:border-black/50"
                 >
@@ -636,9 +712,7 @@ export default function AdminProductCreate() {
                 <input
                   type="text"
                   name="productType"
-                  value={
-                    formData.productType
-                  }
+                  value={formData.productType}
                   onChange={handleChange}
                   placeholder="Hijab"
                   className="mt-3 h-13 w-full border border-black/15 bg-[#f2eee9] px-4 text-[11px] outline-none transition focus:border-black/50"
@@ -653,9 +727,7 @@ export default function AdminProductCreate() {
                 <input
                   type="text"
                   name="vendor"
-                  value={
-                    formData.vendor
-                  }
+                  value={formData.vendor}
                   onChange={handleChange}
                   placeholder="Haya"
                   className="mt-3 h-13 w-full border border-black/15 bg-[#f2eee9] px-4 text-[11px] outline-none transition focus:border-black/50"
@@ -676,76 +748,63 @@ export default function AdminProductCreate() {
                 <p className="mt-5 text-[9px] text-[#786d65]">
                   Loading categories...
                 </p>
+              ) : groupedCategories.length === 0 ? (
+                <p className="mt-5 text-[9px] text-[#786d65]">
+                  No active categories found.
+                </p>
               ) : (
                 <div className="mt-5 space-y-5">
-                  {groupedCategories.map(
-                    (parent) => (
-                      <div
-                        key={parent.id}
-                        className="border border-black/10 bg-[#f2eee9] p-4"
-                      >
-                        <label className="flex cursor-pointer items-start gap-3">
-                          <input
-                            type="checkbox"
-                            checked={selectedCategoryIds.includes(
-                              parent.id
-                            )}
-                            onChange={() =>
-                              handleCategoryToggle(
-                                parent.id
-                              )
-                            }
-                            className="mt-0.5"
-                          />
+                  {groupedCategories.map((parent) => (
+                    <div
+                      key={parent.id}
+                      className="border border-black/10 bg-[#f2eee9] p-4"
+                    >
+                      <label className="flex cursor-pointer items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedCategoryIds.includes(parent.id)}
+                          onChange={() =>
+                            handleCategoryToggle(parent.id)
+                          }
+                          className="mt-0.5"
+                        />
 
-                          <span>
-                            <span className="block text-[8px] uppercase tracking-[0.16em]">
-                              {parent.name}
-                            </span>
-
-                            <span className="mt-1 block text-[8px] text-[#786d65]">
-                              Main category
-                            </span>
+                        <span>
+                          <span className="block text-[8px] uppercase tracking-[0.16em]">
+                            {parent.name}
                           </span>
-                        </label>
 
-                        {parent.children.length >
-                          0 && (
-                          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                            {parent.children.map(
-                              (child) => (
-                                <label
-                                  key={
-                                    child.id
-                                  }
-                                  className="flex cursor-pointer items-start gap-3"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedCategoryIds.includes(
-                                      child.id
-                                    )}
-                                    onChange={() =>
-                                      handleCategoryToggle(
-                                        child.id
-                                      )
-                                    }
-                                    className="mt-0.5"
-                                  />
+                          <span className="mt-1 block text-[8px] text-[#786d65]">
+                            Main category
+                          </span>
+                        </span>
+                      </label>
 
-                                  <span className="text-[9px] leading-5 text-[#4f4741]">
-                                    {
-                                      child.name
-                                    }
-                                  </span>
-                                </label>
-                              )
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  )}
+                      {parent.children.length > 0 && (
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                          {parent.children.map((child) => (
+                            <label
+                              key={child.id}
+                              className="flex cursor-pointer items-start gap-3"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedCategoryIds.includes(child.id)}
+                                onChange={() =>
+                                  handleCategoryToggle(child.id)
+                                }
+                                className="mt-0.5"
+                              />
+
+                              <span className="text-[9px] leading-5 text-[#4f4741]">
+                                {child.name}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -765,9 +824,7 @@ export default function AdminProductCreate() {
                 <input
                   type="text"
                   name="seoTitle"
-                  value={
-                    formData.seoTitle
-                  }
+                  value={formData.seoTitle}
                   onChange={handleChange}
                   className="mt-3 h-13 w-full border border-black/15 bg-[#f2eee9] px-4 text-[11px] outline-none transition focus:border-black/50"
                 />
@@ -780,9 +837,7 @@ export default function AdminProductCreate() {
 
                 <textarea
                   name="seoDescription"
-                  value={
-                    formData.seoDescription
-                  }
+                  value={formData.seoDescription}
                   onChange={handleChange}
                   rows={4}
                   className="mt-3 w-full resize-y border border-black/15 bg-[#f2eee9] px-4 py-4 text-[11px] leading-6 outline-none transition focus:border-black/50"
@@ -800,9 +855,7 @@ export default function AdminProductCreate() {
 
             <select
               name="status"
-              value={
-                formData.status
-              }
+              value={formData.status}
               onChange={handleChange}
               className="mt-5 h-13 w-full border border-black/15 bg-[#f2eee9] px-4 text-[11px] outline-none"
             >
@@ -833,9 +886,7 @@ export default function AdminProductCreate() {
               <input
                 type="checkbox"
                 name="featured"
-                checked={
-                  formData.featured
-                }
+                checked={formData.featured}
                 onChange={handleChange}
                 className="mt-0.5"
               />
@@ -855,9 +906,7 @@ export default function AdminProductCreate() {
               <input
                 type="checkbox"
                 name="isNewArrival"
-                checked={
-                  formData.isNewArrival
-                }
+                checked={formData.isNewArrival}
                 onChange={handleChange}
                 className="mt-0.5"
               />
@@ -877,9 +926,7 @@ export default function AdminProductCreate() {
               <input
                 type="checkbox"
                 name="isBestseller"
-                checked={
-                  formData.isBestseller
-                }
+                checked={formData.isBestseller}
                 onChange={handleChange}
                 className="mt-0.5"
               />
@@ -896,12 +943,30 @@ export default function AdminProductCreate() {
             </label>
           </section>
 
+
+          <button
+  type="button"
+  onClick={() => {
+    const confirmed = window.confirm(
+      "Clear this unsaved product draft and start fresh?"
+    );
+
+    if (!confirmed) return;
+
+    window.localStorage.removeItem(CREATE_PRODUCT_DRAFT_KEY);
+    setFormData(initialFormData);
+    setSelectedCategoryIds([]);
+    setSlugEdited(false);
+    setMessage("");
+  }}
+  className="flex min-h-11 w-full items-center justify-center border border-black/15 px-6 text-[8px] uppercase tracking-[0.18em] transition hover:bg-white"
+>
+  Clear Saved Draft
+</button>
+
           <button
             type="submit"
-            disabled={
-              isSubmitting ||
-              !canSubmit
-            }
+            disabled={isSubmitting || !canSubmit}
             className="flex min-h-13 w-full items-center justify-center gap-2 bg-[#211c18] px-6 text-[8px] uppercase tracking-[0.2em] text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Save
@@ -915,7 +980,13 @@ export default function AdminProductCreate() {
           </button>
 
           {message && (
-            <p className="border border-[#9b493f]/20 bg-[#9b493f]/5 p-4 text-[9px] leading-5 text-[#9b493f]">
+            <p
+              className={
+                messageType === "success"
+                  ? "border border-[#55705a]/20 bg-[#55705a]/5 p-4 text-[9px] leading-5 text-[#45604b]"
+                  : "border border-[#9b493f]/20 bg-[#9b493f]/5 p-4 text-[9px] leading-5 text-[#9b493f]"
+              }
+            >
               {message}
             </p>
           )}
