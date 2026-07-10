@@ -34,18 +34,30 @@ function normaliseHexCode(value) {
 }
 
 function createSkuPart(value) {
-  return value
+  return String(value || "")
     .trim()
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 20);
+    .replace(/^-+|-+$/g, "");
+}
+
+function createRandomSkuSuffix(length = 4) {
+  const characters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+  return Array.from(
+    { length },
+    () =>
+      characters[
+        Math.floor(Math.random() * characters.length)
+      ]
+  ).join("");
 }
 
 function createSuggestedSku(
   productName,
   colourName,
-  size
+  size,
+  suffix = ""
 ) {
   const productPart =
     createSkuPart(productName)
@@ -53,17 +65,75 @@ function createSuggestedSku(
       .filter(Boolean)
       .map((part) => part.slice(0, 3))
       .join("")
-      .slice(0, 8) || "HAYA";
+      .slice(0, 10) || "HAYA";
 
   const colourPart =
-    createSkuPart(colourName).slice(0, 6) ||
-    "CLR";
+    createSkuPart(colourName).slice(0, 14) ||
+    "COLOUR";
 
   const sizePart =
-    createSkuPart(size).slice(0, 6) ||
+    createSkuPart(size).slice(0, 10) ||
     "SIZE";
 
-  return `${productPart}-${colourPart}-${sizePart}`;
+  const cleanSuffix =
+    createSkuPart(suffix) ||
+    createRandomSkuSuffix();
+
+  return `${productPart}-${colourPart}-${sizePart}-${cleanSuffix}`;
+}
+
+async function createUniqueVariantSku({
+  productName,
+  colourName,
+  size,
+  currentVariantId = null,
+  preferredSku = "",
+}) {
+  const cleanPreferredSku =
+    createSkuPart(preferredSku);
+
+  const checkSkuAvailability = async (sku) => {
+    let query = supabase
+      .from("product_variants")
+      .select("id")
+      .eq("sku", sku)
+      .limit(1);
+
+    if (currentVariantId) {
+      query = query.neq("id", currentVariantId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw error;
+    }
+
+    return !data || data.length === 0;
+  };
+
+  if (
+    cleanPreferredSku &&
+    (await checkSkuAvailability(cleanPreferredSku))
+  ) {
+    return cleanPreferredSku;
+  }
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const candidateSku = createSuggestedSku(
+      productName,
+      colourName,
+      size
+    );
+
+    if (await checkSkuAvailability(candidateSku)) {
+      return candidateSku;
+    }
+  }
+
+  throw new Error(
+    "A unique SKU could not be generated. Please try saving again."
+  );
 }
 
 function sortByPosition(items) {
@@ -382,7 +452,6 @@ export default function AdminProductVariants({
   };
 
   const handleAddColour = async () => {
-    event.preventDefault();
 
     const colourName =
       newColour.name.trim();
@@ -723,20 +792,13 @@ export default function AdminProductVariants({
     variant,
     value
   ) => {
-    const nextSku =
-      !variant.sku ||
-      variant.sku ===
-        createSuggestedSku(
+    const nextSku = variant.isNew
+      ? createSuggestedSku(
           productName,
           colour.name,
-          variant.size || "One Size"
+          value
         )
-        ? createSuggestedSku(
-            productName,
-            colour.name,
-            value
-          )
-        : variant.sku;
+      : variant.sku;
 
     setColours((current) =>
       current.map((item) => {
@@ -775,7 +837,7 @@ export default function AdminProductVariants({
       variant.size || ""
     ).trim();
 
-    const sku = String(
+    const enteredSku = String(
       variant.sku || ""
     ).trim();
 
@@ -914,11 +976,22 @@ export default function AdminProductVariants({
 
     setMessage("");
 
-    const variantPayload = {
+    try {
+      const uniqueSku = await createUniqueVariantSku({
+        productName,
+        colourName: colour.name,
+        size,
+        currentVariantId: variant.isNew
+          ? null
+          : variant.id,
+        preferredSku: enteredSku,
+      });
+
+      const variantPayload = {
       product_id: productId,
       color_id: colour.id,
       title: `${colour.name} / ${size}`,
-      sku: sku || null,
+      sku: uniqueSku,
       barcode:
         String(variant.barcode || "").trim() ||
         null,
@@ -939,7 +1012,6 @@ export default function AdminProductVariants({
       is_active: variant.is_active,
     };
 
-    try {
       let response;
 
       if (variant.isNew) {
@@ -1000,15 +1072,85 @@ export default function AdminProductVariants({
           .single();
       }
 
-      if (response.error) {
-        if (
-          response.error.code === "23505"
-        ) {
-          throw new Error(
-            "That SKU is already being used by another variant."
-          );
-        }
+      if (
+        response.error &&
+        response.error.code === "23505"
+      ) {
+        const retrySku =
+          await createUniqueVariantSku({
+            productName,
+            colourName: colour.name,
+            size,
+            currentVariantId: variant.isNew
+              ? null
+              : variant.id,
+          });
 
+        const retryPayload = {
+          ...variantPayload,
+          sku: retrySku,
+        };
+
+        if (variant.isNew) {
+          response = await supabase
+            .from("product_variants")
+            .insert(retryPayload)
+            .select(`
+              id,
+              product_id,
+              color_id,
+              title,
+              sku,
+              barcode,
+              color,
+              size,
+              price,
+              compare_at_price,
+              cost_price,
+              stock_quantity,
+              low_stock_threshold,
+              track_inventory,
+              allow_backorder,
+              weight_grams,
+              position,
+              is_active,
+              created_at,
+              updated_at
+            `)
+            .single();
+        } else {
+          response = await supabase
+            .from("product_variants")
+            .update(retryPayload)
+            .eq("id", variant.id)
+            .eq("product_id", productId)
+            .select(`
+              id,
+              product_id,
+              color_id,
+              title,
+              sku,
+              barcode,
+              color,
+              size,
+              price,
+              compare_at_price,
+              cost_price,
+              stock_quantity,
+              low_stock_threshold,
+              track_inventory,
+              allow_backorder,
+              weight_grams,
+              position,
+              is_active,
+              created_at,
+              updated_at
+            `)
+            .single();
+        }
+      }
+
+      if (response.error) {
         throw response.error;
       }
 
@@ -1036,7 +1178,7 @@ export default function AdminProductVariants({
       );
 
       showMessage(
-        `${colour.name} / ${size} was saved.`,
+        `${colour.name} / ${size} was saved with SKU ${response.data.sku}.`,
         "success"
       );
     } catch (error) {
@@ -1293,8 +1435,8 @@ export default function AdminProductVariants({
         <div
           className={
             messageType === "success"
-              ? "mt-5 flex items-start gap-3 border border-[#55705a]/20 bg-[#55705a]/5 p-4 text-[#45604b]"
-              : "mt-5 flex items-start gap-3 border border-[#9b493f]/20 bg-[#9b493f]/5 p-4 text-[#9b493f]"
+              ? "sticky top-3 z-30 mt-5 flex items-start gap-3 border border-[#55705a]/20 bg-[#eef4ef] p-4 text-[#45604b] shadow-lg sm:static sm:shadow-none"
+              : "sticky top-3 z-30 mt-5 flex items-start gap-3 border border-[#9b493f]/20 bg-[#f8ecea] p-4 text-[#9b493f] shadow-lg sm:static sm:shadow-none"
           }
         >
           {messageType === "success" ? (
