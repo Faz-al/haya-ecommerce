@@ -1,13 +1,11 @@
+import AdminProductVariants from "../../components/admin/AdminProductVariants";
+import AdminProductImages from "../../components/admin/AdminProductImages";
+
 import {
   AlertCircle,
-  Check,
-  ChevronDown,
-  ChevronUp,
+  ArrowLeft,
   LoaderCircle,
-  PackagePlus,
-  Plus,
   Save,
-  Trash2,
 } from "lucide-react";
 import {
   useCallback,
@@ -15,1759 +13,1406 @@ import {
   useMemo,
   useState,
 } from "react";
+import {
+  Link,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 
 import { supabase } from "../../lib/supabase";
+import RichTextEditor from "../../components/admin/RichTextEditor";
 
-function createTemporaryId(prefix) {
-  return `${prefix}-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2)}`;
-}
-
-function normaliseHexCode(value) {
-  const cleaned = value
+function createSlug(value) {
+  return String(value || "")
+    .toLowerCase()
     .trim()
-    .replace(/[^a-fA-F0-9]/g, "")
-    .slice(0, 6);
-
-  return cleaned ? `#${cleaned}` : "";
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
-function createSkuPart(value) {
-  return value
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 20);
-}
+async function createUniqueProductSlug(baseSlug, currentProductId) {
+  const fallbackSlug = "product";
+  const cleanBaseSlug = createSlug(baseSlug) || fallbackSlug;
 
-function createSuggestedSku(
-  productName,
-  colourName,
-  size
-) {
-  const productPart =
-    createSkuPart(productName)
-      .split("-")
-      .filter(Boolean)
-      .map((part) => part.slice(0, 3))
-      .join("")
-      .slice(0, 8) || "HAYA";
+  let finalSlug = cleanBaseSlug;
+  let counter = 2;
 
-  const colourPart =
-    createSkuPart(colourName).slice(0, 6) ||
-    "CLR";
+  while (true) {
+    let query = supabase
+      .from("products")
+      .select("id")
+      .eq("slug", finalSlug)
+      .limit(1);
 
-  const sizePart =
-    createSkuPart(size).slice(0, 6) ||
-    "SIZE";
-
-  return `${productPart}-${colourPart}-${sizePart}`;
-}
-
-function sortByPosition(items) {
-  return [...items].sort((a, b) => {
-    const positionDifference =
-      (a.position || 0) - (b.position || 0);
-
-    if (positionDifference !== 0) {
-      return positionDifference;
+    if (currentProductId) {
+      query = query.neq("id", currentProductId);
     }
 
-    return String(a.created_at || "").localeCompare(
-      String(b.created_at || "")
-    );
-  });
+    const { data, error } = await query;
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data || data.length === 0) {
+      return finalSlug;
+    }
+
+    finalSlug = `${cleanBaseSlug}-${counter}`;
+    counter += 1;
+  }
 }
 
-export default function AdminProductVariants({
-  productId,
-  productName,
-  basePrice,
-  compareAtPrice,
-}) {
-  const [colours, setColours] = useState([]);
-  const [expandedColourIds, setExpandedColourIds] =
+function groupCategories(categories) {
+  const parents = categories
+    .filter((category) => !category.parent_id)
+    .sort(
+      (a, b) =>
+        Number(a.position || 0) -
+        Number(b.position || 0)
+    );
+
+  return parents.map((parent) => ({
+    ...parent,
+    children: categories
+      .filter(
+        (category) =>
+          category.parent_id === parent.id
+      )
+      .sort(
+        (a, b) =>
+          Number(a.position || 0) -
+          Number(b.position || 0)
+      ),
+  }));
+}
+
+const initialFormData = {
+  name: "",
+  slug: "",
+
+  shortDescription: "",
+  description: "",
+
+  productType: "Hijab",
+  vendor: "Haya",
+
+  basePrice: "",
+  compareAtPrice: "",
+  currency: "INR",
+
+  status: "draft",
+
+  featured: false,
+  isNewArrival: false,
+  isBestseller: false,
+
+  seoTitle: "",
+  seoDescription: "",
+};
+
+const EDIT_PRODUCT_DRAFT_PREFIX = "haya-admin-product-edit-draft";
+
+export default function AdminProductEdit() {
+  const { productId } = useParams();
+  const navigate = useNavigate();
+
+  const editDraftKey = `${EDIT_PRODUCT_DRAFT_PREFIX}-${productId}`;
+
+  const [formData, setFormData] =
+    useState(initialFormData);
+
+    const [draftRestored, setDraftRestored] = useState(false);
+
+    const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+    const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
+
+  const [originalProduct, setOriginalProduct] =
+    useState(null);
+
+  const [categories, setCategories] =
     useState([]);
 
-  const [loading, setLoading] = useState(true);
-  const [savingColour, setSavingColour] =
+  const [
+    selectedCategoryIds,
+    setSelectedCategoryIds,
+  ] = useState([]);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [isSubmitting, setIsSubmitting] =
     useState(false);
 
-  const [newColour, setNewColour] = useState({
-    name: "",
-    hexCode: "#D8C4B6",
-  });
+  const [loadError, setLoadError] =
+    useState("");
 
-  const [message, setMessage] = useState("");
+  const [message, setMessage] =
+    useState("");
+
   const [messageType, setMessageType] =
     useState("error");
 
-  const totalVariants = useMemo(() => {
-    return colours.reduce(
-      (total, colour) =>
-        total + (colour.variants?.length || 0),
-      0
+  const groupedCategories = useMemo(
+    () => groupCategories(categories),
+    [categories]
+  );
+
+  const canSubmit = useMemo(() => {
+    return Boolean(
+      formData.name.trim() &&
+        formData.slug.trim() &&
+        formData.basePrice !== ""
     );
-  }, [colours]);
+  }, [
+    formData.name,
+    formData.slug,
+    formData.basePrice,
+  ]);
 
-  const totalStock = useMemo(() => {
-    return colours.reduce((colourTotal, colour) => {
-      const colourStock = (
-        colour.variants || []
-      ).reduce((variantTotal, variant) => {
-        if (!variant.is_active) {
-          return variantTotal;
-        }
+  const fetchProduct = useCallback(async () => {
+    if (!productId) {
+      setLoadError("A product ID was not provided.");
+      setLoading(false);
+      return;
+    }
 
-        return (
-          variantTotal +
-          (Number(variant.stock_quantity) || 0)
-        );
-      }, 0);
+    setLoading(true);
+    setLoadError("");
 
-      return colourTotal + colourStock;
-    }, 0);
-  }, [colours]);
-
-  const fetchColoursAndVariants =
-    useCallback(async () => {
-      if (!productId) return;
-
-      setLoading(true);
-      setMessage("");
-
-      try {
-        const [
-          colourResponse,
-          variantResponse,
-        ] = await Promise.all([
-          supabase
-            .from("product_colors")
-            .select(`
+    try {
+      const [
+        productResponse,
+        categoriesResponse,
+        productCategoriesResponse,
+      ] = await Promise.all([
+        supabase
+          .from("products")
+          .select(
+            `
               id,
-              product_id,
               name,
-              hex_code,
-              swatch_image_path,
-              swatch_image_url,
-              position,
-              is_active,
-              created_at
-            `)
-            .eq("product_id", productId)
-            .order("position", {
-              ascending: true,
-            }),
-
-          supabase
-            .from("product_variants")
-            .select(`
-              id,
-              product_id,
-              color_id,
-              title,
-              sku,
-              barcode,
-              color,
-              size,
-              price,
+              slug,
+              short_description,
+              description,
+              product_type,
+              vendor,
+              base_price,
               compare_at_price,
-              cost_price,
-              stock_quantity,
-              low_stock_threshold,
-              track_inventory,
-              allow_backorder,
-              weight_grams,
-              position,
-              is_active,
-              created_at,
-              updated_at
-            `)
-            .eq("product_id", productId)
-            .order("position", {
-              ascending: true,
-            }),
-        ]);
-
-        if (colourResponse.error) {
-          throw colourResponse.error;
-        }
-
-        if (variantResponse.error) {
-          throw variantResponse.error;
-        }
-
-        const variants =
-          variantResponse.data || [];
-
-        const mergedColours = (
-          colourResponse.data || []
-        ).map((colour) => ({
-          ...colour,
-          isSaving: false,
-          variants: sortByPosition(
-            variants
-              .filter(
-                (variant) =>
-                  variant.color_id === colour.id
-              )
-              .map((variant) => ({
-                ...variant,
-                isSaving: false,
-              }))
-          ),
-        }));
-
-        setColours(sortByPosition(mergedColours));
-
-        setExpandedColourIds((current) => {
-          if (current.length > 0) {
-            return current.filter((id) =>
-              mergedColours.some(
-                (colour) => colour.id === id
-              )
-            );
-          }
-
-          return mergedColours[0]
-            ? [mergedColours[0].id]
-            : [];
-        });
-      } catch (error) {
-        console.error(
-          "Failed to load product variants:",
-          error
-        );
-
-        setMessageType("error");
-        setMessage(
-          error.message ||
-            "Colours and variants could not be loaded."
-        );
-      } finally {
-        setLoading(false);
-      }
-    }, [productId]);
-
-  useEffect(() => {
-    fetchColoursAndVariants();
-  }, [fetchColoursAndVariants]);
-
-  const showMessage = (
-    text,
-    type = "error"
-  ) => {
-    setMessage(text);
-    setMessageType(type);
-  };
-
-  const toggleColour = (colourId) => {
-    setExpandedColourIds((current) => {
-      if (current.includes(colourId)) {
-        return current.filter(
-          (id) => id !== colourId
-        );
-      }
-
-      return [...current, colourId];
-    });
-  };
-
-  const updateColourLocally = (
-    colourId,
-    field,
-    value
-  ) => {
-    setColours((current) =>
-      current.map((colour) =>
-        colour.id === colourId
-          ? {
-              ...colour,
-              [field]: value,
-            }
-          : colour
-      )
-    );
-
-    setMessage("");
-  };
-
-  const updateVariantLocally = (
-    colourId,
-    variantId,
-    field,
-    value
-  ) => {
-    setColours((current) =>
-      current.map((colour) => {
-        if (colour.id !== colourId) {
-          return colour;
-        }
-
-        return {
-          ...colour,
-          variants: colour.variants.map(
-            (variant) =>
-              variant.id === variantId
-                ? {
-                    ...variant,
-                    [field]: value,
-                  }
-                : variant
-          ),
-        };
-      })
-    );
-
-    setMessage("");
-  };
-
-  const setColourSaving = (
-    colourId,
-    isSaving
-  ) => {
-    setColours((current) =>
-      current.map((colour) =>
-        colour.id === colourId
-          ? {
-              ...colour,
-              isSaving,
-            }
-          : colour
-      )
-    );
-  };
-
-  const setVariantSaving = (
-    colourId,
-    variantId,
-    isSaving
-  ) => {
-    setColours((current) =>
-      current.map((colour) => {
-        if (colour.id !== colourId) {
-          return colour;
-        }
-
-        return {
-          ...colour,
-          variants: colour.variants.map(
-            (variant) =>
-              variant.id === variantId
-                ? {
-                    ...variant,
-                    isSaving,
-                  }
-                : variant
-          ),
-        };
-      })
-    );
-  };
-
-  const handleNewColourChange = (event) => {
-    const { name, value } = event.target;
-
-    setNewColour((current) => ({
-      ...current,
-      [name]:
-        name === "hexCode"
-          ? normaliseHexCode(value)
-          : value,
-    }));
-
-    setMessage("");
-  };
-
-  const handleAddColour = async () => {
-    event.preventDefault();
-
-    const colourName =
-      newColour.name.trim();
-
-    if (!colourName) {
-      showMessage(
-        "Enter a name for the colour."
-      );
-      return;
-    }
-
-    if (
-      colours.some(
-        (colour) =>
-          colour.name.toLowerCase() ===
-          colourName.toLowerCase()
-      )
-    ) {
-      showMessage(
-        "This product already has that colour."
-      );
-      return;
-    }
-
-    const hexCode = normaliseHexCode(
-      newColour.hexCode
-    );
-
-    if (
-      hexCode &&
-      !/^#[0-9A-Fa-f]{6}$/.test(hexCode)
-    ) {
-      showMessage(
-        "Enter a valid six-character hex colour."
-      );
-      return;
-    }
-
-    setSavingColour(true);
-    setMessage("");
-
-    try {
-      const nextPosition = colours.length;
-
-      const { data, error } = await supabase
-        .from("product_colors")
-        .insert({
-          product_id: productId,
-          name: colourName,
-          hex_code: hexCode || null,
-          position: nextPosition,
-          is_active: true,
-        })
-        .select(`
-          id,
-          product_id,
-          name,
-          hex_code,
-          swatch_image_path,
-          swatch_image_url,
-          position,
-          is_active,
-          created_at
-        `)
-        .single();
-
-      if (error) {
-        throw error;
-      }
-
-      const addedColour = {
-        ...data,
-        variants: [],
-        isSaving: false,
-      };
-
-      setColours((current) => [
-        ...current,
-        addedColour,
-      ]);
-
-      setExpandedColourIds((current) => [
-        ...current,
-        addedColour.id,
-      ]);
-
-      setNewColour({
-        name: "",
-        hexCode: "#D8C4B6",
-      });
-
-      showMessage(
-        `${addedColour.name} was added.`,
-        "success"
-      );
-    } catch (error) {
-      console.error(
-        "Failed to add colour:",
-        error
-      );
-
-      showMessage(
-        error.message ||
-          "The colour could not be added."
-      );
-    } finally {
-      setSavingColour(false);
-    }
-  };
-
-  const handleSaveColour = async (
-    colour
-  ) => {
-    const colourName = colour.name.trim();
-    const hexCode = normaliseHexCode(
-      colour.hex_code || ""
-    );
-
-    if (!colourName) {
-      showMessage(
-        "Every colour requires a name."
-      );
-      return;
-    }
-
-    if (
-      hexCode &&
-      !/^#[0-9A-Fa-f]{6}$/.test(hexCode)
-    ) {
-      showMessage(
-        "Enter a valid six-character hex colour."
-      );
-      return;
-    }
-
-    setColourSaving(colour.id, true);
-    setMessage("");
-
-    try {
-      const { data, error } = await supabase
-        .from("product_colors")
-        .update({
-          name: colourName,
-          hex_code: hexCode || null,
-          is_active: colour.is_active,
-        })
-        .eq("id", colour.id)
-        .eq("product_id", productId)
-        .select(`
-          id,
-          name,
-          hex_code,
-          is_active
-        `)
-        .single();
-
-      if (error) {
-        throw error;
-      }
-
-      setColours((current) =>
-        current.map((item) =>
-          item.id === colour.id
-            ? {
-                ...item,
-                ...data,
-                isSaving: false,
-              }
-            : item
-        )
-      );
-
-      showMessage(
-        `${data.name} was saved.`,
-        "success"
-      );
-    } catch (error) {
-      console.error(
-        "Failed to save colour:",
-        error
-      );
-
-      setColourSaving(colour.id, false);
-
-      showMessage(
-        error.message ||
-          "The colour could not be saved."
-      );
-    }
-  };
-
-  const handleDeleteColour = async (
-    colour
-  ) => {
-    const confirmed = window.confirm(
-      `Delete ${colour.name} and all of its size variants? This cannot be undone.`
-    );
-
-    if (!confirmed) return;
-
-    setColourSaving(colour.id, true);
-    setMessage("");
-
-    try {
-      const { error: imageDetachError } =
-        await supabase
-          .from("product_images")
-          .update({
-            color_id: null,
-            variant_id: null,
-          })
-          .eq("product_id", productId)
-          .eq("color_id", colour.id);
-
-      if (imageDetachError) {
-        throw imageDetachError;
-      }
-
-      const { error: variantDeleteError } =
-        await supabase
-          .from("product_variants")
-          .delete()
-          .eq("product_id", productId)
-          .eq("color_id", colour.id);
-
-      if (variantDeleteError) {
-        throw variantDeleteError;
-      }
-
-      const { error: colourDeleteError } =
-        await supabase
-          .from("product_colors")
-          .delete()
-          .eq("product_id", productId)
-          .eq("id", colour.id);
-
-      if (colourDeleteError) {
-        throw colourDeleteError;
-      }
-
-      setColours((current) =>
-        current.filter(
-          (item) => item.id !== colour.id
-        )
-      );
-
-      setExpandedColourIds((current) =>
-        current.filter(
-          (id) => id !== colour.id
-        )
-      );
-
-      showMessage(
-        `${colour.name} was deleted.`,
-        "success"
-      );
-    } catch (error) {
-      console.error(
-        "Failed to delete colour:",
-        error
-      );
-
-      setColourSaving(colour.id, false);
-
-      showMessage(
-        error.message ||
-          "The colour could not be deleted."
-      );
-    }
-  };
-
-  const handleAddVariant = (colour) => {
-    const nextPosition =
-      colour.variants.length;
-
-    const temporaryVariant = {
-      id: createTemporaryId("variant"),
-      product_id: productId,
-      color_id: colour.id,
-      title: `${colour.name} / One Size`,
-      sku: createSuggestedSku(
-        productName,
-        colour.name,
-        "One Size"
-      ),
-      barcode: "",
-      color: colour.name,
-      size: "One Size",
-      price:
-        basePrice === "" ||
-        basePrice === null ||
-        basePrice === undefined
-          ? "0"
-          : String(basePrice),
-      compare_at_price:
-        compareAtPrice === "" ||
-        compareAtPrice === null ||
-        compareAtPrice === undefined
-          ? ""
-          : String(compareAtPrice),
-      cost_price: "",
-      stock_quantity: "0",
-      low_stock_threshold: "5",
-      track_inventory: true,
-      allow_backorder: false,
-      weight_grams: "",
-      position: nextPosition,
-      is_active: true,
-      isNew: true,
-      isSaving: false,
-    };
-
-    setColours((current) =>
-      current.map((item) =>
-        item.id === colour.id
-          ? {
-              ...item,
-              variants: [
-                ...item.variants,
-                temporaryVariant,
-              ],
-            }
-          : item
-      )
-    );
-
-    setExpandedColourIds((current) =>
-      current.includes(colour.id)
-        ? current
-        : [...current, colour.id]
-    );
-
-    setMessage("");
-  };
-
-  const handleSizeChange = (
-    colour,
-    variant,
-    value
-  ) => {
-    const nextSku =
-      !variant.sku ||
-      variant.sku ===
-        createSuggestedSku(
-          productName,
-          colour.name,
-          variant.size || "One Size"
-        )
-        ? createSuggestedSku(
-            productName,
-            colour.name,
-            value
+              currency,
+              status,
+              featured,
+              is_featured,
+              is_new_arrival,
+              is_bestseller,
+              featured_position,
+              new_arrival_position,
+              bestseller_position,
+              seo_title,
+              seo_description,
+              published_at,
+              created_at
+            `
           )
-        : variant.sku;
+          .eq("id", productId)
+          .single(),
 
-    setColours((current) =>
-      current.map((item) => {
-        if (item.id !== colour.id) {
-          return item;
-        }
+        supabase
+          .from("categories")
+          .select(
+            `
+              id,
+              parent_id,
+              name,
+              slug,
+              position,
+              is_active
+            `
+          )
+          .eq("is_active", true)
+          .order("position", {
+            ascending: true,
+          })
+          .order("name", {
+            ascending: true,
+          }),
 
-        return {
-          ...item,
-          variants: item.variants.map(
-            (currentVariant) =>
-              currentVariant.id === variant.id
-                ? {
-                    ...currentVariant,
-                    size: value,
-                    title: `${colour.name} / ${
-                      value.trim() ||
-                      "Unnamed Size"
-                    }`,
-                    sku: nextSku,
-                  }
-                : currentVariant
-          ),
-        };
-      })
-    );
+        supabase
+          .from("product_categories")
+          .select("category_id")
+          .eq("product_id", productId),
+      ]);
 
-    setMessage("");
-  };
-
-  const handleSaveVariant = async (
-    colour,
-    variant
-  ) => {
-    const size = String(
-      variant.size || ""
-    ).trim();
-
-    const sku = String(
-      variant.sku || ""
-    ).trim();
-
-    const price = Number(variant.price);
-
-    const compareAtPriceValue =
-      variant.compare_at_price === "" ||
-      variant.compare_at_price === null ||
-      variant.compare_at_price === undefined
-        ? null
-        : Number(variant.compare_at_price);
-
-    const stockQuantity = Number(
-      variant.stock_quantity
-    );
-
-    const lowStockThreshold = Number(
-      variant.low_stock_threshold
-    );
-
-    const costPrice =
-      variant.cost_price === "" ||
-      variant.cost_price === null ||
-      variant.cost_price === undefined
-        ? null
-        : Number(variant.cost_price);
-
-    const weightGrams =
-      variant.weight_grams === "" ||
-      variant.weight_grams === null ||
-      variant.weight_grams === undefined
-        ? null
-        : Number(variant.weight_grams);
-
-    if (!size) {
-      showMessage(
-        "Enter a size before saving the variant."
-      );
-      return;
-    }
-
-    if (
-      colour.variants.some(
-        (item) =>
-          item.id !== variant.id &&
-          String(item.size)
-            .trim()
-            .toLowerCase() ===
-            size.toLowerCase()
-      )
-    ) {
-      showMessage(
-        `${colour.name} already has a ${size} variant.`
-      );
-      return;
-    }
-
-    if (
-      Number.isNaN(price) ||
-      price < 0
-    ) {
-      showMessage(
-        "Enter a valid variant price."
-      );
-      return;
-    }
-
-    if (
-      compareAtPriceValue !== null &&
-      (Number.isNaN(compareAtPriceValue) ||
-        compareAtPriceValue < 0)
-    ) {
-      showMessage(
-        "Enter a valid compare-at price."
-      );
-      return;
-    }
-
-    if (
-      compareAtPriceValue !== null &&
-      compareAtPriceValue <= price
-    ) {
-      showMessage(
-        "Variant compare-at price must be higher than its selling price."
-      );
-      return;
-    }
-
-    if (
-      !Number.isInteger(stockQuantity) ||
-      stockQuantity < 0
-    ) {
-      showMessage(
-        "Stock must be a whole number of zero or more."
-      );
-      return;
-    }
-
-    if (
-      !Number.isInteger(lowStockThreshold) ||
-      lowStockThreshold < 0
-    ) {
-      showMessage(
-        "Low-stock threshold must be a whole number of zero or more."
-      );
-      return;
-    }
-
-    if (
-      costPrice !== null &&
-      (Number.isNaN(costPrice) ||
-        costPrice < 0)
-    ) {
-      showMessage(
-        "Enter a valid cost price."
-      );
-      return;
-    }
-
-    if (
-      weightGrams !== null &&
-      (!Number.isInteger(weightGrams) ||
-        weightGrams < 0)
-    ) {
-      showMessage(
-        "Weight must be a whole number of grams."
-      );
-      return;
-    }
-
-    setVariantSaving(
-      colour.id,
-      variant.id,
-      true
-    );
-
-    setMessage("");
-
-    const variantPayload = {
-      product_id: productId,
-      color_id: colour.id,
-      title: `${colour.name} / ${size}`,
-      sku: sku || null,
-      barcode:
-        String(variant.barcode || "").trim() ||
-        null,
-      color: colour.name,
-      size,
-      price,
-      compare_at_price: compareAtPriceValue,
-      cost_price: costPrice,
-      stock_quantity: stockQuantity,
-      low_stock_threshold:
-        lowStockThreshold,
-      track_inventory:
-        variant.track_inventory,
-      allow_backorder:
-        variant.allow_backorder,
-      weight_grams: weightGrams,
-      position: variant.position || 0,
-      is_active: variant.is_active,
-    };
-
-    try {
-      let response;
-
-      if (variant.isNew) {
-        response = await supabase
-          .from("product_variants")
-          .insert(variantPayload)
-          .select(`
-            id,
-            product_id,
-            color_id,
-            title,
-            sku,
-            barcode,
-            color,
-            size,
-            price,
-            compare_at_price,
-            cost_price,
-            stock_quantity,
-            low_stock_threshold,
-            track_inventory,
-            allow_backorder,
-            weight_grams,
-            position,
-            is_active,
-            created_at,
-            updated_at
-          `)
-          .single();
-      } else {
-        response = await supabase
-          .from("product_variants")
-          .update(variantPayload)
-          .eq("id", variant.id)
-          .eq("product_id", productId)
-          .select(`
-            id,
-            product_id,
-            color_id,
-            title,
-            sku,
-            barcode,
-            color,
-            size,
-            price,
-            compare_at_price,
-            cost_price,
-            stock_quantity,
-            low_stock_threshold,
-            track_inventory,
-            allow_backorder,
-            weight_grams,
-            position,
-            is_active,
-            created_at,
-            updated_at
-          `)
-          .single();
-      }
-
-      if (response.error) {
+      if (productResponse.error) {
         if (
-          response.error.code === "23505"
+          productResponse.error.code ===
+          "PGRST116"
         ) {
           throw new Error(
-            "That SKU is already being used by another variant."
+            "This product could not be found."
           );
         }
 
-        throw response.error;
+        throw productResponse.error;
       }
 
-      setColours((current) =>
-        current.map((item) => {
-          if (item.id !== colour.id) {
-            return item;
-          }
+      if (categoriesResponse.error) {
+        throw categoriesResponse.error;
+      }
 
-          return {
-            ...item,
-            variants: item.variants.map(
-              (currentVariant) =>
-                currentVariant.id ===
-                variant.id
-                  ? {
-                      ...response.data,
-                      isNew: false,
-                      isSaving: false,
-                    }
-                  : currentVariant
-            ),
-          };
-        })
+      if (productCategoriesResponse.error) {
+        throw productCategoriesResponse.error;
+      }
+
+      const data = productResponse.data;
+
+      setOriginalProduct(data);
+      setSlugManuallyEdited(false);
+
+      setCategories(
+        categoriesResponse.data || []
       );
 
-      showMessage(
-        `${colour.name} / ${size} was saved.`,
-        "success"
+      setSelectedCategoryIds(
+        (
+          productCategoriesResponse.data ||
+          []
+        ).map((row) => row.category_id)
       );
+
+      const loadedCategoryIds =
+  (
+    productCategoriesResponse.data ||
+    []
+  ).map((row) => row.category_id);
+
+const loadedFormData = {
+  name: data.name || "",
+  slug: data.slug || "",
+
+  shortDescription:
+    data.short_description || "",
+
+  description:
+    data.description || "",
+
+  productType:
+    data.product_type || "Hijab",
+
+  vendor:
+    data.vendor || "Haya",
+
+  basePrice:
+    data.base_price === null ||
+    data.base_price === undefined
+      ? ""
+      : String(data.base_price),
+
+  compareAtPrice:
+    data.compare_at_price === null ||
+    data.compare_at_price === undefined
+      ? ""
+      : String(data.compare_at_price),
+
+  currency:
+    data.currency || "INR",
+
+  status:
+    data.status || "draft",
+
+  featured: Boolean(
+    data.is_featured ??
+      data.featured
+  ),
+
+  isNewArrival: Boolean(
+    data.is_new_arrival
+  ),
+
+  isBestseller: Boolean(
+    data.is_bestseller
+  ),
+
+  seoTitle:
+    data.seo_title || "",
+
+  seoDescription:
+    data.seo_description || "",
+};
+
+let nextFormData = loadedFormData;
+let nextCategoryIds = loadedCategoryIds;
+let restoredDraft = false;
+
+try {
+  const savedDraft = window.localStorage.getItem(editDraftKey);
+
+  if (savedDraft) {
+    const parsedDraft = JSON.parse(savedDraft);
+
+    if (parsedDraft?.formData) {
+      nextFormData = {
+        ...loadedFormData,
+        ...parsedDraft.formData,
+      };
+
+      restoredDraft = true;
+    }
+
+    if (Array.isArray(parsedDraft?.selectedCategoryIds)) {
+      nextCategoryIds = parsedDraft.selectedCategoryIds;
+      restoredDraft = true;
+    }
+
+    if (typeof parsedDraft?.slugManuallyEdited === "boolean") {
+      setSlugManuallyEdited(parsedDraft.slugManuallyEdited);
+    }
+  }
+} catch (error) {
+  console.error("Failed to restore product edit draft:", error);
+}
+
+setSelectedCategoryIds(nextCategoryIds);
+setFormData(nextFormData);
+setDraftRestored(restoredDraft);
+setHasUnsavedChanges(restoredDraft);
+
+if (restoredDraft) {
+  setMessageType("success");
+  setMessage(
+    "Your unsaved product edits were restored. Review and save when ready."
+  );
+}
     } catch (error) {
       console.error(
-        "Failed to save variant:",
+        "Failed to load product:",
         error
       );
 
-      setVariantSaving(
-        colour.id,
-        variant.id,
-        false
-      );
-
-      showMessage(
+      setLoadError(
         error.message ||
-          "The variant could not be saved."
+          "The product could not be loaded."
       );
+    } finally {
+      setLoading(false);
     }
+}, [editDraftKey, productId]);
+
+  useEffect(() => {
+    fetchProduct();
+  }, [fetchProduct]);
+
+  useEffect(() => {
+  if (loading || loadError || !originalProduct || !hasUnsavedChanges) {
+  return;
+}
+
+  const hasUsefulDraft =
+    formData.name.trim() ||
+    formData.slug.trim() ||
+    formData.shortDescription.trim() ||
+    formData.description.trim() ||
+    formData.basePrice !== "" ||
+    selectedCategoryIds.length > 0;
+
+  if (!hasUsefulDraft) {
+    return;
+  }
+
+  const timeoutId = window.setTimeout(() => {
+    try {
+      window.localStorage.setItem(
+        editDraftKey,
+        JSON.stringify({
+          formData,
+          selectedCategoryIds,
+          slugManuallyEdited,
+          savedAt: new Date().toISOString(),
+        })
+      );
+    } catch (error) {
+      console.error("Failed to autosave product edit draft:", error);
+    }
+  }, 500);
+
+  return () => window.clearTimeout(timeoutId);
+}, [
+  editDraftKey,
+  formData,
+  selectedCategoryIds,
+  slugManuallyEdited,
+  loading,
+  loadError,
+  originalProduct,
+  hasUnsavedChanges,
+]);
+
+  const handleChange = (event) => {
+  const {
+    name,
+    value,
+    type,
+    checked,
+  } = event.target;
+
+  setMessage("");
+
+  setHasUnsavedChanges(true);
+
+  setFormData((current) => {
+    const nextValue =
+      type === "checkbox" ? checked : value;
+
+    const nextData = {
+      ...current,
+      [name]: nextValue,
+    };
+
+    if (name === "name" && !slugManuallyEdited) {
+      nextData.slug = createSlug(value);
+    }
+
+    return nextData;
+  });
+};
+
+  const handleSlugChange = (event) => {
+  setSlugManuallyEdited(true);
+  setHasUnsavedChanges(true);
+
+  setFormData((current) => ({
+    ...current,
+    slug: createSlug(event.target.value),
+  }));
+
+  setMessage("");
+};
+
+  const handleCategoryToggle = (
+    categoryId
+  ) => {
+    setMessage("");
+
+    setHasUnsavedChanges(true);
+
+    setSelectedCategoryIds(
+      (current) => {
+        if (
+          current.includes(categoryId)
+        ) {
+          return current.filter(
+            (id) => id !== categoryId
+          );
+        }
+
+        return [
+          ...current,
+          categoryId,
+        ];
+      }
+    );
   };
 
-  const handleDeleteVariant = async (
-    colour,
-    variant
-  ) => {
-    if (variant.isNew) {
-      setColours((current) =>
-        current.map((item) =>
-          item.id === colour.id
-            ? {
-                ...item,
-                variants:
-                  item.variants.filter(
-                    (currentVariant) =>
-                      currentVariant.id !==
-                      variant.id
-                  ),
-              }
-            : item
-        )
-      );
+  const saveProductCategories = async () => {
+    const { error: deleteError } =
+      await supabase
+        .from("product_categories")
+        .delete()
+        .eq("product_id", productId);
 
+    if (deleteError) {
+      throw deleteError;
+    }
+
+    if (
+      selectedCategoryIds.length === 0
+    ) {
       return;
     }
 
-    const confirmed = window.confirm(
-      `Delete ${colour.name} / ${variant.size}?`
-    );
+    const categoryRows =
+      selectedCategoryIds.map(
+        (categoryId) => ({
+          product_id: productId,
+          category_id: categoryId,
+        })
+      );
 
-    if (!confirmed) return;
+    const { error: insertError } =
+      await supabase
+        .from("product_categories")
+        .insert(categoryRows);
 
-    setVariantSaving(
-      colour.id,
-      variant.id,
-      true
-    );
+    if (insertError) {
+      throw insertError;
+    }
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+
+    if (isSubmitting) return;
 
     setMessage("");
+    setMessageType("error");
+
+    if (!canSubmit) {
+      setMessage(
+        "Product name, slug and selling price are required."
+      );
+      return;
+    }
+
+    const basePrice = Number(
+      formData.basePrice
+    );
+
+    const compareAtPrice =
+      formData.compareAtPrice === ""
+        ? null
+        : Number(
+            formData.compareAtPrice
+          );
+
+    if (
+      Number.isNaN(basePrice) ||
+      basePrice < 0
+    ) {
+      setMessage(
+        "Please enter a valid selling price."
+      );
+      return;
+    }
+
+    if (
+      compareAtPrice !== null &&
+      (
+        Number.isNaN(compareAtPrice) ||
+        compareAtPrice < 0
+      )
+    ) {
+      setMessage(
+        "Please enter a valid compare-at price."
+      );
+      return;
+    }
+
+    if (
+      compareAtPrice !== null &&
+      compareAtPrice <= basePrice
+    ) {
+      setMessage(
+        "Compare-at price should be higher than the selling price."
+      );
+      return;
+    }
+
+    setIsSubmitting(true);
 
     try {
-      const { error: imageDetachError } =
-        await supabase
-          .from("product_images")
-          .update({
-            variant_id: null,
-          })
-          .eq("variant_id", variant.id);
+      let publishedAt =
+        originalProduct?.published_at ||
+        null;
 
-      if (imageDetachError) {
-        throw imageDetachError;
+      if (
+        formData.status === "active" &&
+        !publishedAt
+      ) {
+        publishedAt =
+          new Date().toISOString();
       }
 
-      const { error } = await supabase
-        .from("product_variants")
-        .delete()
-        .eq("id", variant.id)
-        .eq("product_id", productId);
+      if (
+        formData.status !== "active"
+      ) {
+        publishedAt = null;
+      }
+
+     const safeSlug = await createUniqueProductSlug(
+  formData.slug || formData.name,
+  productId
+);
+
+const productUpdate = {
+  name: formData.name.trim(),
+  slug: safeSlug,
+
+        short_description:
+          formData.shortDescription.trim() ||
+          null,
+
+        description:
+          formData.description.trim() ||
+          null,
+
+        product_type:
+          formData.productType.trim() ||
+          null,
+
+        vendor:
+          formData.vendor.trim() ||
+          "Haya",
+
+        base_price: basePrice,
+        compare_at_price:
+          compareAtPrice,
+        currency: formData.currency,
+
+        status: formData.status,
+
+        /*
+         * Keep old featured field and new
+         * production merchandising fields.
+         */
+        featured: formData.featured,
+        is_featured:
+          formData.featured,
+        is_new_arrival:
+          formData.isNewArrival,
+        is_bestseller:
+          formData.isBestseller,
+
+        seo_title:
+          formData.seoTitle.trim() ||
+          null,
+
+        seo_description:
+          formData.seoDescription.trim() ||
+          null,
+
+        published_at: publishedAt,
+      };
+
+      const {
+        data: updatedProduct,
+        error,
+      } = await supabase
+        .from("products")
+        .update(productUpdate)
+        .eq("id", productId)
+        .select(
+          `
+            id,
+            name,
+            slug,
+            published_at
+          `
+        )
+        .single();
 
       if (error) {
+        if (error.code === "23505") {
+          throw new Error(
+            "Another product already uses this URL slug."
+          );
+        }
+
         throw error;
       }
 
-      setColours((current) =>
-        current.map((item) =>
-          item.id === colour.id
-            ? {
-                ...item,
-                variants:
-                  item.variants.filter(
-                    (currentVariant) =>
-                      currentVariant.id !==
-                      variant.id
-                  ),
-              }
-            : item
-        )
-      );
+      await saveProductCategories();
 
-      showMessage(
-        `${colour.name} / ${variant.size} was deleted.`,
-        "success"
-      );
+      try {
+  window.localStorage.removeItem(editDraftKey);
+} catch (error) {
+  console.error("Failed to clear product edit draft:", error);
+}
+
+setDraftRestored(false);
+setHasUnsavedChanges(false);
+
+      setOriginalProduct((current) => ({
+        ...current,
+        ...updatedProduct,
+      }));
+
+      setFormData((current) => ({
+        ...current,
+        slug: updatedProduct.slug,
+      }));
+setMessageType("success");
+
+if (updatedProduct.slug !== createSlug(formData.slug)) {
+  setMessage(
+    `${updatedProduct.name} details were saved successfully. The URL slug was changed to "${updatedProduct.slug}" because the previous slug was already used. Colours and variants are saved separately using their own Save buttons.`
+  );
+} else {
+  setMessage(
+    `${updatedProduct.name} details were saved successfully. Colours and variants are saved separately using their own Save buttons.`
+  );
+}
+
     } catch (error) {
       console.error(
-        "Failed to delete variant:",
+        "Product update failed:",
         error
       );
 
-      setVariantSaving(
-        colour.id,
-        variant.id,
-        false
-      );
-
-      showMessage(
+      setMessageType("error");
+      setMessage(
         error.message ||
-          "The variant could not be deleted."
+          "The product could not be updated."
       );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   if (loading) {
     return (
-      <section className="border border-black/10 bg-[#e9e2da] p-7">
-        <div className="flex min-h-[240px] items-center justify-center">
-          <div className="text-center">
-            <LoaderCircle
-              size={28}
-              strokeWidth={1.3}
-              className="mx-auto animate-spin"
-            />
+      <div className="flex min-h-[520px] items-center justify-center">
+        <div className="text-center">
+          <LoaderCircle
+            size={34}
+            strokeWidth={1.2}
+            className="mx-auto animate-spin"
+          />
 
-            <p className="mt-4 text-[8px] uppercase tracking-[0.2em] text-[#71665e]">
-              Loading colours and inventory
-            </p>
+          <p className="mt-5 text-[8px] uppercase tracking-[0.2em] text-[#71665e]">
+            Loading product
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex min-h-[520px] items-center justify-center text-center">
+        <div className="max-w-md">
+          <AlertCircle
+            size={34}
+            strokeWidth={1.2}
+            className="mx-auto"
+          />
+
+          <h1 className="mt-5 font-serif text-[38px] tracking-[-0.03em]">
+            Product unavailable
+          </h1>
+
+          <p className="mt-4 text-[11px] leading-6 text-[#71665e]">
+            {loadError}
+          </p>
+
+          <div className="mt-7 flex flex-wrap justify-center gap-3">
+            <button
+              type="button"
+              onClick={fetchProduct}
+              className="min-h-12 border border-black/15 px-7 text-[8px] uppercase tracking-[0.18em]"
+            >
+              Try Again
+            </button>
+
+            <Link
+              to="/admin/products"
+              className="flex min-h-12 items-center justify-center bg-[#211c18] px-7 text-[8px] uppercase tracking-[0.18em] text-white"
+            >
+              Back to Products
+            </Link>
           </div>
         </div>
-      </section>
+      </div>
     );
   }
 
   return (
-    <section className="border border-black/10 bg-[#e9e2da] p-5 sm:p-7">
-      <div className="flex flex-col gap-5 border-b border-black/10 pb-6 sm:flex-row sm:items-end sm:justify-between">
+    <>
+      <Link
+        to="/admin/products"
+        className="inline-flex items-center gap-2 text-[8px] uppercase tracking-[0.18em] text-[#71665e] transition hover:text-[#211c18]"
+      >
+        <ArrowLeft
+          size={13}
+          strokeWidth={1.4}
+        />
+
+        Back to Products
+      </Link>
+
+      <div className="mt-7 flex flex-col gap-6 border-b border-black/10 pb-8 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-[8px] uppercase tracking-[0.22em] text-[#786d65]">
-            Variants and Inventory
+          <p className="text-[8px] uppercase tracking-[0.27em] text-[#786d65]">
+            Catalogue
           </p>
 
-          <h2 className="mt-3 font-serif text-[32px] tracking-[-0.03em]">
-            Colours and sizes
-          </h2>
+          <h1 className="mt-3 font-serif text-[42px] leading-none tracking-[-0.04em] sm:text-[55px]">
+            Edit Product
+          </h1>
 
-          <p className="mt-3 max-w-2xl text-[10px] leading-6 text-[#71665e]">
-            Add each available colour, then create its
-            size, SKU, price and stock combinations.
+          <p className="mt-4 text-[11px] text-[#71665e]">
+            Update product information, pricing,
+            categories, publication and storefront details.
           </p>
-        </div>
-
-        <div className="flex gap-6 text-right">
-          <div>
-            <p className="text-[7px] uppercase tracking-[0.18em] text-[#786d65]">
-              Variants
-            </p>
-
-            <p className="mt-2 font-serif text-[25px]">
-              {totalVariants}
-            </p>
-          </div>
-
-          <div>
-            <p className="text-[7px] uppercase tracking-[0.18em] text-[#786d65]">
-              Active Stock
-            </p>
-
-            <p className="mt-2 font-serif text-[25px]">
-              {totalStock}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-6 grid gap-4 border border-black/10 bg-[#f2eee9] p-4 sm:grid-cols-[1fr_190px_auto] sm:items-end">
-        <div>
-          <label className="block text-[7px] uppercase tracking-[0.17em]">
-            New Colour Name
-          </label>
-
-          <input
-            type="text"
-            name="name"
-            value={newColour.name}
-            onChange={handleNewColourChange}
-            placeholder="Chocolate Brown"
-            className="mt-3 h-12 w-full border border-black/15 bg-white/40 px-4 text-[10px] outline-none focus:border-black/50"
-          />
-        </div>
-
-        <div>
-          <label className="block text-[7px] uppercase tracking-[0.17em]">
-            Hex Swatch
-          </label>
-
-          <div className="mt-3 flex h-12 overflow-hidden border border-black/15 bg-white/40">
-            <input
-              type="color"
-              value={
-                /^#[0-9A-Fa-f]{6}$/.test(
-                  newColour.hexCode
-                )
-                  ? newColour.hexCode
-                  : "#D8C4B6"
-              }
-              onChange={(event) =>
-                setNewColour((current) => ({
-                  ...current,
-                  hexCode: event.target.value,
-                }))
-              }
-              className="h-full w-14 cursor-pointer border-0 bg-transparent p-1"
-            />
-
-            <input
-              type="text"
-              name="hexCode"
-              value={newColour.hexCode}
-              onChange={handleNewColourChange}
-              placeholder="#D8C4B6"
-              className="min-w-0 flex-1 bg-transparent px-3 text-[10px] uppercase outline-none"
-            />
-          </div>
         </div>
 
         <button
-  type="button"
-  onClick={handleAddColour}
-  disabled={savingColour}
-  className="flex h-12 items-center justify-center gap-2 bg-[#211c18] px-6 text-[8px] uppercase tracking-[0.18em] text-white disabled:opacity-50"
->
-          {savingColour ? (
-            <LoaderCircle
-              size={13}
-              className="animate-spin"
-            />
-          ) : (
-            <Plus size={13} />
-          )}
-
-          Add Colour
+          type="button"
+          onClick={() =>
+            navigate(
+              `/product/${formData.slug}`
+            )
+          }
+          disabled={!formData.slug}
+          className="min-h-12 border border-black/15 px-6 text-[8px] uppercase tracking-[0.18em] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          View Product
         </button>
       </div>
 
-      {message && (
-        <div
-          className={
-            messageType === "success"
-              ? "mt-5 flex items-start gap-3 border border-[#55705a]/20 bg-[#55705a]/5 p-4 text-[#45604b]"
-              : "mt-5 flex items-start gap-3 border border-[#9b493f]/20 bg-[#9b493f]/5 p-4 text-[#9b493f]"
+      <form
+        onSubmit={handleSubmit}
+        onKeyDown={(event) => {
+          if (
+            event.key === "Enter" &&
+            event.target.tagName !==
+              "TEXTAREA"
+          ) {
+            event.preventDefault();
           }
-        >
-          {messageType === "success" ? (
-            <Check
-              size={15}
-              strokeWidth={1.5}
-              className="mt-0.5 shrink-0"
-            />
-          ) : (
-            <AlertCircle
-              size={15}
-              strokeWidth={1.5}
-              className="mt-0.5 shrink-0"
-            />
-          )}
+        }}
+        className="mt-8 grid gap-8 xl:grid-cols-[1fr_340px]"
+      >
+        <div className="space-y-8">
+          <section className="border border-black/10 bg-[#e9e2da] p-5 sm:p-7">
+            <p className="text-[8px] uppercase tracking-[0.22em] text-[#786d65]">
+              Product Information
+            </p>
 
-          <p className="text-[9px] leading-5">
-            {message}
-          </p>
-        </div>
-      )}
+            <div className="mt-6 space-y-5">
+              <div>
+                <label className="block text-[8px] uppercase tracking-[0.17em]">
+                  Product Name
+                </label>
 
-      {colours.length === 0 ? (
-        <div className="mt-6 border border-dashed border-black/20 px-6 py-14 text-center">
-          <PackagePlus
-            size={28}
-            strokeWidth={1.2}
-            className="mx-auto text-[#786d65]"
-          />
+                <input
+                  required
+                  type="text"
+                  name="name"
+                  value={formData.name}
+                  onChange={handleChange}
+                  placeholder="Lightweight Chiffon Hijab"
+                  className="mt-3 h-13 w-full border border-black/15 bg-[#f2eee9] px-4 text-[11px] outline-none transition focus:border-black/50"
+                />
+              </div>
 
-          <h3 className="mt-5 font-serif text-[28px] tracking-[-0.03em]">
-            No colours added
-          </h3>
+              <div>
+                <label className="block text-[8px] uppercase tracking-[0.17em]">
+                  URL Slug
+                </label>
 
-          <p className="mx-auto mt-3 max-w-md text-[10px] leading-6 text-[#71665e]">
-            Add the first product colour above.
-            You can then create its available sizes,
-            SKUs and inventory.
-          </p>
-        </div>
-      ) : (
-        <div className="mt-6 space-y-4">
-          {colours.map((colour) => {
-            const isExpanded =
-              expandedColourIds.includes(
-                colour.id
-              );
+                <input
+                  required
+                  type="text"
+                  name="slug"
+                  value={formData.slug}
+                  onChange={handleSlugChange}
+                  placeholder="lightweight-chiffon-hijab"
+                  className="mt-3 h-13 w-full border border-black/15 bg-[#f2eee9] px-4 text-[11px] outline-none transition focus:border-black/50"
+                />
 
-            const colourStock = (
-              colour.variants || []
-            ).reduce(
-              (total, variant) =>
-                total +
-                (variant.is_active
-                  ? Number(
-                      variant.stock_quantity
-                    ) || 0
-                  : 0),
-              0
-            );
+                <p className="mt-2 text-[8px] text-[#81766e]">
+                  Product URL: /product/
+                  {formData.slug ||
+                    "product-slug"}
+                </p>
+              </div>
 
-            return (
-              <article
-                key={colour.id}
-                className="border border-black/10 bg-[#f2eee9]"
-              >
-                <div className="flex flex-col gap-5 p-5 lg:flex-row lg:items-center">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      toggleColour(colour.id)
-                    }
-                    className="flex min-w-0 flex-1 items-center gap-4 text-left"
-                  >
-                    <span
-                      className="h-11 w-11 shrink-0 rounded-full border border-black/15 shadow-inner"
-                      style={{
-                        background:
-                          colour.hex_code ||
-                          "#d7d0c8",
-                      }}
-                    />
+              <div>
+                <label className="block text-[8px] uppercase tracking-[0.17em]">
+                  Short Description
+                </label>
 
-                    <span className="min-w-0">
-                      <span className="block truncate text-[10px] uppercase tracking-[0.13em]">
-                        {colour.name}
-                      </span>
+                <textarea
+                  name="shortDescription"
+                  value={
+                    formData.shortDescription
+                  }
+                  onChange={handleChange}
+                  rows={3}
+                  placeholder="A short description shown near the product title."
+                  className="mt-3 w-full resize-y border border-black/15 bg-[#f2eee9] px-4 py-4 text-[11px] leading-6 outline-none transition focus:border-black/50"
+                />
+              </div>
 
-                      <span className="mt-2 block text-[8px] text-[#786d65]">
-                        {colour.variants.length}{" "}
-                        variant
-                        {colour.variants.length === 1
-                          ? ""
-                          : "s"}{" "}
-                        · {colourStock} in stock
-                      </span>
-                    </span>
-                  </button>
+              <div>
+  <label className="block text-[8px] uppercase tracking-[0.17em]">
+    Full Description
+  </label>
 
-                  <div className="flex flex-wrap items-center gap-3">
-                    <label className="flex items-center gap-2 text-[7px] uppercase tracking-[0.15em]">
-                      <input
-                        type="checkbox"
-                        checked={colour.is_active}
-                        onChange={(event) =>
-                          updateColourLocally(
-                            colour.id,
-                            "is_active",
-                            event.target.checked
-                          )
-                        }
-                      />
+  <RichTextEditor
+    value={formData.description}
+    placeholder="Describe the fabric, feel, styling, care instructions and product details."
+    onChange={(html) => {
+      setMessage("");
+        setHasUnsavedChanges(true);
+      setFormData((current) => ({
+        ...current,
+        description: html,
+      }));
+    }}
+  />
 
-                      Active
-                    </label>
+  <p className="mt-2 text-[8px] leading-5 text-[#81766e]">
+    Use the toolbar to add headings, bold text, italic text,
+    lists, links and images.
+  </p>
+</div>
+            </div>
+          </section>
 
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleAddVariant(colour)
-                      }
-                      className="flex h-10 items-center gap-2 border border-black/15 px-4 text-[7px] uppercase tracking-[0.16em]"
-                    >
-                      <Plus size={12} />
-                      Add Size
-                    </button>
+          <section className="border border-black/10 bg-[#e9e2da] p-5 sm:p-7">
+            <p className="text-[8px] uppercase tracking-[0.22em] text-[#786d65]">
+              Pricing
+            </p>
 
-                    <button
-                      type="button"
-                      onClick={() =>
-                        toggleColour(colour.id)
-                      }
-                      className="flex h-10 w-10 items-center justify-center border border-black/15"
-                    >
-                      {isExpanded ? (
-                        <ChevronUp size={14} />
-                      ) : (
-                        <ChevronDown size={14} />
-                      )}
-                    </button>
-                  </div>
-                </div>
+            <div className="mt-6 grid gap-5 sm:grid-cols-2">
+              <div>
+                <label className="block text-[8px] uppercase tracking-[0.17em]">
+                  Selling Price
+                </label>
 
-                {isExpanded && (
-                  <div className="border-t border-black/10 p-5">
-                    <div className="grid gap-4 md:grid-cols-[1fr_190px_auto_auto] md:items-end">
-                      <div>
-                        <label className="block text-[7px] uppercase tracking-[0.16em]">
-                          Colour Name
+                <input
+                  required
+                  min="0"
+                  step="0.01"
+                  type="number"
+                  name="basePrice"
+                  value={
+                    formData.basePrice
+                  }
+                  onChange={handleChange}
+                  placeholder="158.00"
+                  className="mt-3 h-13 w-full border border-black/15 bg-[#f2eee9] px-4 text-[11px] outline-none transition focus:border-black/50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[8px] uppercase tracking-[0.17em]">
+                  Compare-at Price
+                </label>
+
+                <input
+                  min="0"
+                  step="0.01"
+                  type="number"
+                  name="compareAtPrice"
+                  value={
+                    formData.compareAtPrice
+                  }
+                  onChange={handleChange}
+                  placeholder="199.00"
+                  className="mt-3 h-13 w-full border border-black/15 bg-[#f2eee9] px-4 text-[11px] outline-none transition focus:border-black/50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[8px] uppercase tracking-[0.17em]">
+                  Currency
+                </label>
+
+                <select
+                  name="currency"
+                  value={
+                    formData.currency
+                  }
+                  onChange={handleChange}
+                  className="mt-3 h-13 w-full border border-black/15 bg-[#f2eee9] px-4 text-[11px] outline-none transition focus:border-black/50"
+                >
+                  <option value="INR">
+                    INR
+                  </option>
+
+                  <option value="USD">
+                    USD
+                  </option>
+
+                  <option value="AED">
+                    AED
+                  </option>
+
+                  <option value="GBP">
+                    GBP
+                  </option>
+                </select>
+              </div>
+            </div>
+          </section>
+
+          <section className="border border-black/10 bg-[#e9e2da] p-5 sm:p-7">
+            <p className="text-[8px] uppercase tracking-[0.22em] text-[#786d65]">
+              Organisation
+            </p>
+
+            <div className="mt-6 grid gap-5 sm:grid-cols-2">
+              <div>
+                <label className="block text-[8px] uppercase tracking-[0.17em]">
+                  Product Type
+                </label>
+
+                <input
+                  type="text"
+                  name="productType"
+                  value={
+                    formData.productType
+                  }
+                  onChange={handleChange}
+                  placeholder="Hijab"
+                  className="mt-3 h-13 w-full border border-black/15 bg-[#f2eee9] px-4 text-[11px] outline-none transition focus:border-black/50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[8px] uppercase tracking-[0.17em]">
+                  Vendor
+                </label>
+
+                <input
+                  type="text"
+                  name="vendor"
+                  value={
+                    formData.vendor
+                  }
+                  onChange={handleChange}
+                  placeholder="Haya"
+                  className="mt-3 h-13 w-full border border-black/15 bg-[#f2eee9] px-4 text-[11px] outline-none transition focus:border-black/50"
+                />
+              </div>
+            </div>
+
+            <div className="mt-7 border-t border-black/10 pt-6">
+              <p className="text-[8px] uppercase tracking-[0.18em]">
+                Categories
+              </p>
+
+              <p className="mt-2 text-[9px] leading-5 text-[#786d65]">
+                Select where this product should appear in the shop and navbar category pages.
+              </p>
+
+              {groupedCategories.length ===
+              0 ? (
+                <p className="mt-5 text-[9px] text-[#786d65]">
+                  No active categories found.
+                </p>
+              ) : (
+                <div className="mt-5 space-y-5">
+                  {groupedCategories.map(
+                    (parent) => (
+                      <div
+                        key={parent.id}
+                        className="border border-black/10 bg-[#f2eee9] p-4"
+                      >
+                        <label className="flex cursor-pointer items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedCategoryIds.includes(
+                              parent.id
+                            )}
+                            onChange={() =>
+                              handleCategoryToggle(
+                                parent.id
+                              )
+                            }
+                            className="mt-0.5"
+                          />
+
+                          <span>
+                            <span className="block text-[8px] uppercase tracking-[0.16em]">
+                              {parent.name}
+                            </span>
+
+                            <span className="mt-1 block text-[8px] text-[#786d65]">
+                              Main category
+                            </span>
+                          </span>
                         </label>
 
-                        <input
-                          type="text"
-                          value={colour.name}
-                          onChange={(event) =>
-                            updateColourLocally(
-                              colour.id,
-                              "name",
-                              event.target.value
-                            )
-                          }
-                          className="mt-3 h-11 w-full border border-black/15 bg-white/40 px-4 text-[10px] outline-none"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[7px] uppercase tracking-[0.16em]">
-                          Hex Swatch
-                        </label>
-
-                        <div className="mt-3 flex h-11 overflow-hidden border border-black/15 bg-white/40">
-                          <input
-                            type="color"
-                            value={
-                              /^#[0-9A-Fa-f]{6}$/.test(
-                                colour.hex_code ||
-                                  ""
-                              )
-                                ? colour.hex_code
-                                : "#D8C4B6"
-                            }
-                            onChange={(event) =>
-                              updateColourLocally(
-                                colour.id,
-                                "hex_code",
-                                event.target.value
-                              )
-                            }
-                            className="h-full w-12 cursor-pointer border-0 bg-transparent p-1"
-                          />
-
-                          <input
-                            type="text"
-                            value={
-                              colour.hex_code || ""
-                            }
-                            onChange={(event) =>
-                              updateColourLocally(
-                                colour.id,
-                                "hex_code",
-                                normaliseHexCode(
-                                  event.target.value
-                                )
-                              )
-                            }
-                            className="min-w-0 flex-1 bg-transparent px-3 text-[9px] uppercase outline-none"
-                          />
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleSaveColour(colour)
-                        }
-                        disabled={colour.isSaving}
-                        className="flex h-11 items-center justify-center gap-2 bg-[#211c18] px-5 text-[7px] uppercase tracking-[0.16em] text-white disabled:opacity-50"
-                      >
-                        {colour.isSaving ? (
-                          <LoaderCircle
-                            size={12}
-                            className="animate-spin"
-                          />
-                        ) : (
-                          <Save size={12} />
-                        )}
-
-                        Save
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleDeleteColour(
-                            colour
-                          )
-                        }
-                        disabled={colour.isSaving}
-                        className="flex h-11 items-center justify-center gap-2 border border-[#9b493f]/30 px-5 text-[7px] uppercase tracking-[0.16em] text-[#9b493f] disabled:opacity-50"
-                      >
-                        <Trash2 size={12} />
-                        Delete
-                      </button>
-                    </div>
-
-                    <div className="mt-6">
-                      <div className="hidden grid-cols-[110px_1fr_110px_110px_90px_85px] gap-3 border-b border-black/10 pb-3 text-[7px] uppercase tracking-[0.15em] text-[#786d65] xl:grid">
-                        <span>Size</span>
-                        <span>SKU</span>
-                        <span>Price</span>
-                        <span>Stock</span>
-                        <span>Active</span>
-                        <span>Actions</span>
-                      </div>
-
-                      {colour.variants.length ===
-                      0 ? (
-                        <div className="border-b border-black/10 py-10 text-center">
-                          <p className="text-[9px] text-[#71665e]">
-                            No sizes have been added
-                            for {colour.name}.
-                          </p>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleAddVariant(
-                                colour
-                              )
-                            }
-                            className="mt-4 inline-flex items-center gap-2 text-[7px] uppercase tracking-[0.17em]"
-                          >
-                            <Plus size={12} />
-                            Add First Size
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="divide-y divide-black/[0.08]">
-                          {colour.variants.map(
-                            (variant) => (
-                              <div
-                                key={variant.id}
-                                className="grid gap-4 py-5 xl:grid-cols-[110px_1fr_110px_110px_90px_85px] xl:items-end xl:gap-3"
-                              >
-                                <div>
-                                  <label className="block text-[7px] uppercase tracking-[0.14em] text-[#786d65] xl:hidden">
-                                    Size
-                                  </label>
-
-                                  <input
-                                    type="text"
-                                    value={
-                                      variant.size ||
-                                      ""
-                                    }
-                                    onChange={(
-                                      event
-                                    ) =>
-                                      handleSizeChange(
-                                        colour,
-                                        variant,
-                                        event.target
-                                          .value
-                                      )
-                                    }
-                                    placeholder="One Size"
-                                    className="mt-2 h-10 w-full border border-black/15 bg-white/40 px-3 text-[9px] outline-none xl:mt-0"
-                                  />
-                                </div>
-
-                                <div>
-                                  <label className="block text-[7px] uppercase tracking-[0.14em] text-[#786d65] xl:hidden">
-                                    SKU
-                                  </label>
-
-                                  <input
-                                    type="text"
-                                    value={
-                                      variant.sku ||
-                                      ""
-                                    }
-                                    onChange={(
-                                      event
-                                    ) =>
-                                      updateVariantLocally(
-                                        colour.id,
-                                        variant.id,
-                                        "sku",
-                                        event.target
-                                          .value
-                                          .toUpperCase()
-                                      )
-                                    }
-                                    placeholder="HAYA-BRN-OS"
-                                    className="mt-2 h-10 w-full border border-black/15 bg-white/40 px-3 text-[9px] uppercase outline-none xl:mt-0"
-                                  />
-                                </div>
-
-                                <div>
-                                  <label className="block text-[7px] uppercase tracking-[0.14em] text-[#786d65] xl:hidden">
-                                    Price
-                                  </label>
-
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={
-                                      variant.price
-                                    }
-                                    onChange={(
-                                      event
-                                    ) =>
-                                      updateVariantLocally(
-                                        colour.id,
-                                        variant.id,
-                                        "price",
-                                        event.target
-                                          .value
-                                      )
-                                    }
-                                    className="mt-2 h-10 w-full border border-black/15 bg-white/40 px-3 text-[9px] outline-none xl:mt-0"
-                                  />
-                                </div>
-
-                                <div>
-                                  <label className="block text-[7px] uppercase tracking-[0.14em] text-[#786d65] xl:hidden">
-                                    Stock
-                                  </label>
-
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="1"
-                                    value={
-                                      variant.stock_quantity
-                                    }
-                                    onChange={(
-                                      event
-                                    ) =>
-                                      updateVariantLocally(
-                                        colour.id,
-                                        variant.id,
-                                        "stock_quantity",
-                                        event.target
-                                          .value
-                                      )
-                                    }
-                                    className="mt-2 h-10 w-full border border-black/15 bg-white/40 px-3 text-[9px] outline-none xl:mt-0"
-                                  />
-                                </div>
-
-                                <label className="flex h-10 items-center gap-2 text-[7px] uppercase tracking-[0.14em]">
+                        {parent.children.length >
+                          0 && (
+                          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                            {parent.children.map(
+                              (child) => (
+                                <label
+                                  key={
+                                    child.id
+                                  }
+                                  className="flex cursor-pointer items-start gap-3"
+                                >
                                   <input
                                     type="checkbox"
-                                    checked={
-                                      variant.is_active
-                                    }
-                                    onChange={(
-                                      event
-                                    ) =>
-                                      updateVariantLocally(
-                                        colour.id,
-                                        variant.id,
-                                        "is_active",
-                                        event.target
-                                          .checked
+                                    checked={selectedCategoryIds.includes(
+                                      child.id
+                                    )}
+                                    onChange={() =>
+                                      handleCategoryToggle(
+                                        child.id
                                       )
                                     }
+                                    className="mt-0.5"
                                   />
 
-                                  Active
+                                  <span className="text-[9px] leading-5 text-[#4f4741]">
+                                    {
+                                      child.name
+                                    }
+                                  </span>
                                 </label>
+                              )
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          </section>
 
-                                <div className="flex h-10 gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleSaveVariant(
-                                        colour,
-                                        variant
-                                      )
-                                    }
-                                    disabled={
-                                      variant.isSaving
-                                    }
-                                    className="flex flex-1 items-center justify-center border border-black/15 bg-[#211c18] text-white disabled:opacity-50"
-                                    aria-label="Save variant"
-                                  >
-                                    {variant.isSaving ? (
-                                      <LoaderCircle
-                                        size={13}
-                                        className="animate-spin"
-                                      />
-                                    ) : (
-                                      <Save
-                                        size={13}
-                                      />
-                                    )}
-                                  </button>
+          <section className="border border-black/10 bg-[#e9e2da] p-5 sm:p-7">
+            <p className="text-[8px] uppercase tracking-[0.22em] text-[#786d65]">
+              Search Engine Listing
+            </p>
 
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleDeleteVariant(
-                                        colour,
-                                        variant
-                                      )
-                                    }
-                                    disabled={
-                                      variant.isSaving
-                                    }
-                                    className="flex flex-1 items-center justify-center border border-[#9b493f]/25 text-[#9b493f] disabled:opacity-50"
-                                    aria-label="Delete variant"
-                                  >
-                                    <Trash2
-                                      size={13}
-                                    />
-                                  </button>
-                                </div>
-                              </div>
-                            )
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </article>
-            );
-          })}
+            <div className="mt-6 space-y-5">
+              <div>
+                <label className="block text-[8px] uppercase tracking-[0.17em]">
+                  SEO Title
+                </label>
+
+                <input
+                  type="text"
+                  name="seoTitle"
+                  value={
+                    formData.seoTitle
+                  }
+                  onChange={handleChange}
+                  className="mt-3 h-13 w-full border border-black/15 bg-[#f2eee9] px-4 text-[11px] outline-none transition focus:border-black/50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[8px] uppercase tracking-[0.17em]">
+                  SEO Description
+                </label>
+
+                <textarea
+                  name="seoDescription"
+                  value={
+                    formData.seoDescription
+                  }
+                  onChange={handleChange}
+                  rows={4}
+                  className="mt-3 w-full resize-y border border-black/15 bg-[#f2eee9] px-4 py-4 text-[11px] leading-6 outline-none transition focus:border-black/50"
+                />
+              </div>
+            </div>
+          </section>
+
+          <AdminProductVariants
+            productId={productId}
+            productName={formData.name}
+            basePrice={formData.basePrice}
+            compareAtPrice={
+              formData.compareAtPrice
+            }
+          />
+
+          <AdminProductImages
+            productId={productId}
+            productName={formData.name}
+          />
         </div>
-      )}
-    </section>
+
+        <aside className="space-y-6 xl:sticky xl:top-8 xl:h-fit">
+          <section className="border border-black/10 bg-[#e9e2da] p-6">
+            <p className="text-[8px] uppercase tracking-[0.22em] text-[#786d65]">
+              Product Status
+            </p>
+
+            <select
+              name="status"
+              value={
+                formData.status
+              }
+              onChange={handleChange}
+              className="mt-5 h-13 w-full border border-black/15 bg-[#f2eee9] px-4 text-[11px] outline-none"
+            >
+              <option value="draft">
+                Draft
+              </option>
+
+              <option value="active">
+                Active
+              </option>
+
+              <option value="archived">
+                Archived
+              </option>
+            </select>
+
+            <p className="mt-3 text-[9px] leading-5 text-[#786d65]">
+              Active products can appear on the storefront. Draft products remain visible only to administrators.
+            </p>
+          </section>
+
+          <section className="space-y-5 border border-black/10 bg-[#e9e2da] p-6">
+            <p className="text-[8px] uppercase tracking-[0.22em] text-[#786d65]">
+              Homepage Placement
+            </p>
+
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                name="featured"
+                checked={
+                  formData.featured
+                }
+                onChange={handleChange}
+                className="mt-0.5"
+              />
+
+              <span>
+                <span className="block text-[8px] uppercase tracking-[0.18em]">
+                  Featured Product
+                </span>
+
+                <span className="mt-2 block text-[9px] leading-5 text-[#786d65]">
+                  Use this product in featured homepage sections.
+                </span>
+              </span>
+            </label>
+
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                name="isNewArrival"
+                checked={
+                  formData.isNewArrival
+                }
+                onChange={handleChange}
+                className="mt-0.5"
+              />
+
+              <span>
+                <span className="block text-[8px] uppercase tracking-[0.18em]">
+                  New Arrival
+                </span>
+
+                <span className="mt-2 block text-[9px] leading-5 text-[#786d65]">
+                  Show this product in the New Arrivals section.
+                </span>
+              </span>
+            </label>
+
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                name="isBestseller"
+                checked={
+                  formData.isBestseller
+                }
+                onChange={handleChange}
+                className="mt-0.5"
+              />
+
+              <span>
+                <span className="block text-[8px] uppercase tracking-[0.18em]">
+                  Bestseller
+                </span>
+
+                <span className="mt-2 block text-[9px] leading-5 text-[#786d65]">
+                  Show this product in the Bestseller section.
+                </span>
+              </span>
+            </label>
+          </section>
+
+          <button
+  type="button"
+  onClick={() => {
+    const confirmed = window.confirm(
+      "Clear the saved unsaved edits for this product?"
+    );
+
+    if (!confirmed) return;
+
+    try {
+      window.localStorage.removeItem(editDraftKey);
+    } catch (error) {
+      console.error("Failed to clear product edit draft:", error);
+    }
+
+    setDraftRestored(false);
+    
+    setHasUnsavedChanges(false);
+    setMessage("");
+    fetchProduct();
+  }}
+  className="flex min-h-11 w-full items-center justify-center border border-black/15 px-6 text-[8px] uppercase tracking-[0.18em] transition hover:bg-white"
+>
+  Clear Saved Edits
+</button>
+
+          <button
+            type="submit"
+            disabled={
+              isSubmitting || !canSubmit
+            }
+            className="flex min-h-13 w-full items-center justify-center gap-2 bg-[#211c18] px-6 text-[8px] uppercase tracking-[0.2em] text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSubmitting ? (
+              <LoaderCircle
+                size={14}
+                strokeWidth={1.4}
+                className="animate-spin"
+              />
+            ) : (
+              <Save
+                size={14}
+                strokeWidth={1.4}
+              />
+            )}
+
+            {isSubmitting
+              ? "Saving Details..."
+              : "Save Product Details"}
+          </button>
+
+          <p className="border border-[#9a7b45]/20 bg-[#9a7b45]/5 p-4 text-[9px] leading-5 text-[#765d34]">
+            This button saves product information only. Save every colour and size variant using the Save button inside its row.
+          </p>
+
+          {message && (
+            <p
+              className={
+                messageType === "success"
+                  ? "border border-[#55705a]/20 bg-[#55705a]/5 p-4 text-[9px] leading-5 text-[#45604b]"
+                  : "border border-[#9b493f]/20 bg-[#9b493f]/5 p-4 text-[9px] leading-5 text-[#9b493f]"
+              }
+            >
+              {message}
+            </p>
+          )}
+
+          <section className="border border-black/10 p-5">
+            <p className="text-[8px] uppercase tracking-[0.18em] text-[#786d65]">
+              Product ID
+            </p>
+
+            <p className="mt-3 break-all text-[9px] leading-5 text-[#71665e]">
+              {productId}
+            </p>
+          </section>
+
+          {draftRestored && (
+  <p className="border border-[#55705a]/20 bg-[#55705a]/5 p-4 text-[9px] leading-5 text-[#45604b]">
+    Unsaved edits were restored from this browser. Save the product to make them permanent.
+  </p>
+)}
+        </aside>
+      </form>
+    </>
   );
 }
