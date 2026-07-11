@@ -563,85 +563,179 @@ export default function AdminProductVariants({
   };
 
   const handleSaveColour = async (
-    colour
-  ) => {
-    const colourName = colour.name.trim();
-    const hexCode = normaliseHexCode(
-      colour.hex_code || ""
+  colour
+) => {
+  const colourName = colour.name.trim();
+  const hexCode = normaliseHexCode(
+    colour.hex_code || ""
+  );
+
+  if (!colourName) {
+    showMessage(
+      "Every colour requires a name."
     );
+    return;
+  }
 
-    if (!colourName) {
-      showMessage(
-        "Every colour requires a name."
-      );
-      return;
+  if (
+    hexCode &&
+    !/^#[0-9A-Fa-f]{6}$/.test(hexCode)
+  ) {
+    showMessage(
+      "Enter a valid six-character hex colour."
+    );
+    return;
+  }
+
+  setColourSaving(colour.id, true);
+  setMessage("");
+
+  try {
+    const { data, error } = await supabase
+      .from("product_colors")
+      .update({
+        name: colourName,
+        hex_code: hexCode || null,
+        is_active: colour.is_active,
+      })
+      .eq("id", colour.id)
+      .eq("product_id", productId)
+      .select(`
+        id,
+        name,
+        hex_code,
+        is_active
+      `)
+      .single();
+
+    if (error) {
+      throw error;
     }
 
-    if (
-      hexCode &&
-      !/^#[0-9A-Fa-f]{6}$/.test(hexCode)
-    ) {
-      showMessage(
-        "Enter a valid six-character hex colour."
-      );
-      return;
-    }
+    const updatedVariants = [];
 
-    setColourSaving(colour.id, true);
-    setMessage("");
+    for (const variant of colour.variants || []) {
+      if (variant.isNew) {
+        updatedVariants.push({
+          ...variant,
+          color: colourName,
+          title: `${colourName} / ${
+            variant.size || "One Size"
+          }`,
+          sku: createSuggestedSku(
+            productName,
+            colourName,
+            variant.size || "One Size"
+          ),
+        });
 
-    try {
-      const { data, error } = await supabase
-        .from("product_colors")
+        continue;
+      }
+
+      const currentSku = String(
+        variant.sku || ""
+      ).toUpperCase();
+
+      const colourWasChanged =
+        String(variant.color || "")
+          .trim()
+          .toLowerCase() !==
+        colourName.toLowerCase();
+
+      const shouldCreateNewSku =
+        currentSku.includes("-COPY-") ||
+        colourWasChanged;
+
+      const nextSku = shouldCreateNewSku
+        ? await createUniqueVariantSku({
+            productName,
+            colourName,
+            size:
+              variant.size || "One Size",
+            currentVariantId: variant.id,
+          })
+        : variant.sku;
+
+      const {
+        data: updatedVariant,
+        error: variantError,
+      } = await supabase
+        .from("product_variants")
         .update({
-          name: colourName,
-          hex_code: hexCode || null,
-          is_active: colour.is_active,
+          color: colourName,
+          title: `${colourName} / ${
+            variant.size || "One Size"
+          }`,
+          sku: nextSku,
         })
-        .eq("id", colour.id)
+        .eq("id", variant.id)
         .eq("product_id", productId)
         .select(`
           id,
-          name,
-          hex_code,
-          is_active
+          product_id,
+          color_id,
+          title,
+          sku,
+          barcode,
+          color,
+          size,
+          price,
+          compare_at_price,
+          cost_price,
+          stock_quantity,
+          low_stock_threshold,
+          track_inventory,
+          allow_backorder,
+          weight_grams,
+          position,
+          is_active,
+          created_at,
+          updated_at
         `)
         .single();
 
-      if (error) {
-        throw error;
+      if (variantError) {
+        throw variantError;
       }
 
-      setColours((current) =>
-        current.map((item) =>
-          item.id === colour.id
-            ? {
-                ...item,
-                ...data,
-                isSaving: false,
-              }
-            : item
-        )
-      );
-
-      showMessage(
-        `${data.name} was saved.`,
-        "success"
-      );
-    } catch (error) {
-      console.error(
-        "Failed to save colour:",
-        error
-      );
-
-      setColourSaving(colour.id, false);
-
-      showMessage(
-        error.message ||
-          "The colour could not be saved."
-      );
+      updatedVariants.push({
+        ...updatedVariant,
+        isNew: false,
+        isSaving: false,
+      });
     }
-  };
+
+    setColours((current) =>
+      current.map((item) =>
+        item.id === colour.id
+          ? {
+              ...item,
+              ...data,
+              variants: updatedVariants,
+              isSaving: false,
+            }
+          : item
+      )
+    );
+
+    showMessage(
+      `${data.name} was saved. Its variant SKUs were updated using the new colour name.`,
+      "success"
+    );
+  } catch (error) {
+    console.error(
+      "Failed to save colour:",
+      error
+    );
+
+    setColourSaving(colour.id, false);
+
+    showMessage(
+      error.message ||
+        "The colour could not be saved."
+    );
+  }
+};
 
   const handleDeleteColour = async (
     colour
@@ -977,15 +1071,23 @@ export default function AdminProductVariants({
     setMessage("");
 
     try {
-      const uniqueSku = await createUniqueVariantSku({
-        productName,
-        colourName: colour.name,
-        size,
-        currentVariantId: variant.isNew
-          ? null
-          : variant.id,
-        preferredSku: enteredSku,
-      });
+      const isCopiedSku =
+  enteredSku.toUpperCase().includes("-COPY-");
+
+const uniqueSku = await createUniqueVariantSku({
+  productName,
+  colourName: colour.name,
+  size,
+  currentVariantId: variant.isNew
+    ? null
+    : variant.id,
+
+  // A duplicated SKU containing "-COPY-" should
+  // be replaced using the current product, colour and size.
+  preferredSku: isCopiedSku
+    ? ""
+    : enteredSku,
+});
 
       const variantPayload = {
       product_id: productId,
