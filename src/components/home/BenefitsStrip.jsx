@@ -13,7 +13,7 @@ const benefits = [
   },
   {
     icon: Truck,
-    title: "Worldwide Delivery",
+    title: "Delivery Across India",
     text: "Carefully packed and shipped",
   },
   {
