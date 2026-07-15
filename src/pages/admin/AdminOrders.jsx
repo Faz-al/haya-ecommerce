@@ -108,8 +108,9 @@ function StatusBadge({ value }) {
   return (
     <span
       className={[
-        "inline-flex rounded-full px-2.5 py-1",
-        "text-[7px] uppercase tracking-[0.13em]",
+        "inline-flex max-w-full rounded-full px-2 py-1",
+        "truncate whitespace-nowrap text-[6px] uppercase tracking-[0.1em]",
+        "sm:px-2.5 sm:text-[7px] sm:tracking-[0.13em]",
         getStatusClass(value),
       ].join(" ")}
     >
@@ -521,128 +522,188 @@ const confirmDeleteOrder = async () => {
         </div>
       ) : (
         <div className="mt-8 overflow-hidden border border-black/10 bg-[#eee8e1]">
-          <div className="hidden grid-cols-[1.1fr_1.25fr_0.85fr_0.9fr_0.9fr_0.7fr_110px] gap-4 border-b border-black/10 bg-[#e4ddd5] px-5 py-4 text-[7px] uppercase tracking-[0.16em] text-[#756a62] xl:grid">
-            <span>Order</span>
-            <span>Customer</span>
-            <span>Order Status</span>
-            <span>Payment</span>
-            <span>Fulfilment</span>
-            <span>Total</span>
-            <span>Actions</span>
+  {/* Desktop table headings */}
+  <div className="hidden grid-cols-[1.1fr_1.25fr_0.85fr_0.9fr_0.9fr_0.7fr_110px] gap-4 border-b border-black/10 bg-[#e4ddd5] px-5 py-4 text-[7px] uppercase tracking-[0.16em] text-[#756a62] xl:grid">
+    <span>Order</span>
+    <span>Customer</span>
+    <span>Order Status</span>
+    <span>Payment</span>
+    <span>Fulfilment</span>
+    <span>Total</span>
+    <span>Actions</span>
+  </div>
+
+  <div className="divide-y divide-black/[0.08]">
+    {filteredOrders.map((order) => {
+      const customerEmail =
+        order.customer_email ||
+        order.email ||
+        "No email";
+
+      const isDeleting =
+        deletingOrderId ===
+        order.id;
+
+      return (
+        <Link
+          key={order.id}
+          to={`/admin/orders/${order.id}`}
+          className="group block px-4 py-4 transition hover:bg-black/[0.025] sm:px-5 xl:grid xl:grid-cols-[1.1fr_1.25fr_0.85fr_0.9fr_0.9fr_0.7fr_110px] xl:items-center xl:gap-4 xl:py-5"
+        >
+          {/* Compact mobile/tablet layout */}
+          <div className="xl:contents">
+            <div className="flex items-start justify-between gap-4 xl:block">
+              <div className="min-w-0">
+                <p className="truncate text-[9px] uppercase tracking-[0.12em]">
+                  {order.order_number ||
+                    "Order"}
+                </p>
+
+                <p className="mt-1.5 text-[8px] text-[#7a7068]">
+                  {formatDate(
+                    order.created_at
+                  )}
+                </p>
+
+                <p className="mt-1 text-[8px] text-[#7a7068]">
+                  {Number(
+                    order.item_count
+                  ) || 0}{" "}
+                  {Number(
+                    order.item_count
+                  ) === 1
+                    ? "item"
+                    : "items"}
+                </p>
+              </div>
+
+              <div className="shrink-0 text-right xl:hidden">
+                <p className="text-[11px]">
+                  {formatCurrency(
+                    order.total,
+                    order.currency
+                  )}
+                </p>
+
+                <ChevronRight
+                  size={16}
+                  strokeWidth={1.3}
+                  className="ml-auto mt-2 text-[#776c64]"
+                />
+              </div>
+            </div>
+
+            <div className="mt-3 min-w-0 border-t border-black/[0.06] pt-3 xl:mt-0 xl:border-0 xl:pt-0">
+              <p className="truncate text-[9px]">
+                {order.customer_name ||
+                  "Customer"}
+              </p>
+
+              <p className="mt-1 truncate text-[8px] text-[#7a7068]">
+                {customerEmail}
+              </p>
+
+              {order.customer_phone && (
+                <p className="mt-1 hidden truncate text-[8px] text-[#7a7068] sm:block">
+                  {
+                    order.customer_phone
+                  }
+                </p>
+              )}
+            </div>
+
+            {/* Mobile status row */}
+            <div className="mt-3 grid grid-cols-3 gap-2 xl:contents">
+              <div className="min-w-0">
+                <p className="mb-1.5 text-[6px] uppercase tracking-[0.12em] text-[#81766e] xl:hidden">
+                  Order
+                </p>
+
+                <StatusBadge
+                  value={
+                    order.status
+                  }
+                />
+              </div>
+
+              <div className="min-w-0">
+                <p className="mb-1.5 text-[6px] uppercase tracking-[0.12em] text-[#81766e] xl:hidden">
+                  Payment
+                </p>
+
+                <StatusBadge
+                  value={
+                    order.payment_status
+                  }
+                />
+              </div>
+
+              <div className="min-w-0">
+                <p className="mb-1.5 text-[6px] uppercase tracking-[0.12em] text-[#81766e] xl:hidden">
+                  Fulfilment
+                </p>
+
+                <StatusBadge
+                  value={
+                    order.fulfillment_status
+                  }
+                />
+              </div>
+            </div>
+
+            {/* Desktop total */}
+            <div className="hidden xl:block">
+              <p className="text-[10px]">
+                {formatCurrency(
+                  order.total,
+                  order.currency
+                )}
+              </p>
+            </div>
+
+            {/* Actions */}
+            <div className="mt-3 flex items-center justify-end gap-2 border-t border-black/[0.06] pt-3 xl:mt-0 xl:border-0 xl:pt-0">
+              <button
+                type="button"
+                onClick={(event) =>
+                  handleDeleteOrder(
+                    event,
+                    order
+                  )
+                }
+                disabled={isDeleting}
+                className="inline-flex min-h-9 items-center justify-center gap-1.5 border border-red-900/20 px-3 text-[7px] uppercase tracking-[0.14em] text-red-900 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <LoaderCircle
+                    size={12}
+                    strokeWidth={1.4}
+                    className="animate-spin"
+                  />
+                ) : (
+                  <Trash2
+                    size={12}
+                    strokeWidth={1.4}
+                  />
+                )}
+
+                {isDeleting
+                  ? "Deleting"
+                  : "Delete"}
+              </button>
+
+              <ChevronRight
+                size={17}
+                strokeWidth={1.3}
+                className="hidden text-[#776c64] transition group-hover:translate-x-1 xl:block"
+              />
+            </div>
           </div>
-
-          <div className="divide-y divide-black/[0.08]">
-            {filteredOrders.map((order) => {
-              const customerEmail =
-                order.customer_email || order.email || "No email";
-
-              const isDeleting = deletingOrderId === order.id;
-
-              return (
-                <Link
-                  key={order.id}
-                  to={`/admin/orders/${order.id}`}
-                  className="group grid gap-5 px-5 py-5 transition hover:bg-black/[0.025] xl:grid-cols-[1.1fr_1.25fr_0.85fr_0.9fr_0.9fr_0.7fr_110px] xl:items-center xl:gap-4"
-                >
-                  <div>
-                    <p className="text-[9px] uppercase tracking-[0.12em]">
-                      {order.order_number || "Order"}
-                    </p>
-
-                    <p className="mt-2 text-[8px] text-[#7a7068]">
-                      {formatDate(order.created_at)}
-                    </p>
-
-                    <p className="mt-1 text-[8px] text-[#7a7068]">
-                      {Number(order.item_count) || 0}{" "}
-                      {Number(order.item_count) === 1 ? "item" : "items"}
-                    </p>
-                  </div>
-
-                  <div className="min-w-0">
-                    <p className="truncate text-[9px]">
-                      {order.customer_name || "Customer"}
-                    </p>
-
-                    <p className="mt-2 truncate text-[8px] text-[#7a7068]">
-                      {customerEmail}
-                    </p>
-
-                    {order.customer_phone && (
-                      <p className="mt-1 truncate text-[8px] text-[#7a7068]">
-                        {order.customer_phone}
-                      </p>
-                    )}
-                  </div>
-
-                  <div>
-                    <p className="mb-2 text-[7px] uppercase tracking-[0.14em] text-[#81766e] xl:hidden">
-                      Order
-                    </p>
-
-                    <StatusBadge value={order.status} />
-                  </div>
-
-                  <div>
-                    <p className="mb-2 text-[7px] uppercase tracking-[0.14em] text-[#81766e] xl:hidden">
-                      Payment
-                    </p>
-
-                    <StatusBadge value={order.payment_status} />
-                  </div>
-
-                  <div>
-                    <p className="mb-2 text-[7px] uppercase tracking-[0.14em] text-[#81766e] xl:hidden">
-                      Fulfilment
-                    </p>
-
-                    <StatusBadge value={order.fulfillment_status} />
-                  </div>
-
-                  <div>
-                    <p className="mb-2 text-[7px] uppercase tracking-[0.14em] text-[#81766e] xl:hidden">
-                      Total
-                    </p>
-
-                    <p className="text-[10px]">
-                      {formatCurrency(order.total, order.currency)}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={(event) => handleDeleteOrder(event, order)}
-                      disabled={isDeleting}
-                      className="inline-flex min-h-10 items-center justify-center gap-1.5 border border-red-900/20 px-3 text-[7px] uppercase tracking-[0.14em] text-red-900 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {isDeleting ? (
-                        <LoaderCircle
-                          size={12}
-                          strokeWidth={1.4}
-                          className="animate-spin"
-                        />
-                      ) : (
-                        <Trash2
-                          size={12}
-                          strokeWidth={1.4}
-                        />
-                      )}
-
-                      {isDeleting ? "Deleting" : "Delete"}
-                    </button>
-
-                    <ChevronRight
-                      size={17}
-                      strokeWidth={1.3}
-                      className="hidden text-[#776c64] transition group-hover:translate-x-1 xl:block"
-                    />
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
+        </Link>
+      );
+    })}
+  </div>
+</div>
       )}
 
 

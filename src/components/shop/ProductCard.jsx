@@ -113,29 +113,29 @@ export default function ProductCard({
             {product.category}
           </p>
 
-          <div className="mt-1.5 flex items-start justify-between gap-3">
-            <h3 className="text-[9px] uppercase leading-[1.45] tracking-[0.11em] text-[#211c18] sm:text-[10px]">
-              {product.name}
-            </h3>
+          <div className="mt-1.5 sm:flex sm:items-start sm:justify-between sm:gap-3">
+  <h3 className="min-w-0 text-[9px] uppercase leading-[1.45] tracking-[0.11em] text-[#211c18] sm:text-[10px]">
+    {product.name}
+  </h3>
 
-            <div className="shrink-0 text-right text-[9px] text-[#211c18] sm:text-[10px]">
-              {product.originalPrice && (
-                <span className="mr-2 text-[#948981] line-through">
-                  {formatPrice(
-                    product.originalPrice,
-                    product.currency
-                  )}
-                </span>
-              )}
+  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px] text-[#211c18] sm:mt-0 sm:shrink-0 sm:justify-end sm:text-right sm:text-[10px]">
+    {product.originalPrice && (
+      <span className="text-[#948981] line-through">
+        {formatPrice(
+          product.originalPrice,
+          product.currency
+        )}
+      </span>
+    )}
 
-              <span>
-                {formatPrice(
-                  product.price,
-                  product.currency
-                )}
-              </span>
-            </div>
-          </div>
+    <span>
+      {formatPrice(
+        product.price,
+        product.currency
+      )}
+    </span>
+  </div>
+</div>
 
           <div className="mt-3 flex gap-1.5">
             {product.colourOptions

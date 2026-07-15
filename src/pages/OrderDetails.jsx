@@ -35,11 +35,36 @@ function formatOrderDate(dateValue) {
   }).format(date);
 }
 
-function formatCurrency(amount, currency = "USD") {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-  }).format(Number(amount) || 0);
+function formatCurrency(
+  amount,
+  currency = "INR"
+) {
+  return new Intl.NumberFormat(
+    "en-IN",
+    {
+      style: "currency",
+      currency:
+        currency || "INR",
+      maximumFractionDigits: 2,
+    }
+  ).format(
+    Number(amount) || 0
+  );
+}
+
+function formatWords(
+  value,
+  fallback = ""
+) {
+  return String(
+    value || fallback
+  )
+    .replaceAll("_", " ")
+    .replace(
+      /\b\w/g,
+      (letter) =>
+        letter.toUpperCase()
+    );
 }
 
 export default function OrderDetails() {
@@ -57,6 +82,32 @@ export default function OrderDetails() {
       currentOrder.id === orderId ||
       currentOrder.orderNumber === orderId
   );
+
+
+  const paymentProvider =
+  order?.paymentProvider ||
+  order?.payment_provider ||
+  order?.paymentMethod ||
+  order?.payment_method ||
+  "";
+
+const paymentMethodLabel =
+  paymentProvider ===
+  "cash_on_delivery"
+    ? "Cash on Delivery"
+    : paymentProvider ===
+        "razorpay"
+      ? "Online Payment"
+      : "Not specified";
+
+const codCharge =
+  Number(
+    order?.codCharge ??
+      order?.cod_fee ??
+      0
+  );
+
+
 
   if (ordersLoading) {
     return (
@@ -311,6 +362,24 @@ export default function OrderDetails() {
                   </span>
                 </div>
 
+                    {codCharge > 0 && (
+  <div className="flex items-center justify-between text-[10px]">
+    <span className="text-[#71665e]">
+      COD Charge
+    </span>
+
+    <span>
+      {formatCurrency(
+        codCharge,
+        order.currency
+      )}
+    </span>
+  </div>
+)}
+
+
+
+
                 <div className="flex items-center justify-between text-[10px]">
                   <span className="text-[#71665e]">
                     Shipping
@@ -422,9 +491,9 @@ export default function OrderDetails() {
                     Method
                   </span>
 
-                  <span className="capitalize">
-                    {order.paymentMethod || "card"}
-                  </span>
+                 <span>
+  {paymentMethodLabel}
+</span>
                 </div>
 
                 <div className="flex justify-between gap-4">
@@ -432,9 +501,14 @@ export default function OrderDetails() {
                     Status
                   </span>
 
-                  <span className="capitalize">
-                    {order.paymentStatus || "pending"}
-                  </span>
+                  <span>
+  {formatWords(
+    order.paymentStatus ||
+      order.payment_status,
+    "pending"
+  )}
+</span>
+
                 </div>
               </div>
             </section>

@@ -7,10 +7,10 @@ export const heroSlides = [
     id: 1,
     image: heroOne,
     eyebrow: "",
-    title: "Resort",
-    subtitle: "New In: Part Two",
+    title: "New Arrivals",
+    subtitle: "Fresh Styles, Just Added.",
     buttonText: "Shop Now",
-    href: "#new-in",
+    href: "/shop?sort=newest",
   },
   {
     id: 2,
@@ -19,7 +19,7 @@ export const heroSlides = [
     title: "The Summer Edit",
     subtitle: "Light Layers. Effortless Dressing.",
     buttonText: "Discover Now",
-    href: "#collections",
+    href: "/shop?category=hijabs",
   },
   {
     id: 3,
@@ -28,6 +28,6 @@ export const heroSlides = [
     title: "New Season",
     subtitle: "Modern Modesty, Reimagined",
     buttonText: "Explore Collection",
-    href: "#collections",
+    href: "/shop?category=abayas",
   },
 ];

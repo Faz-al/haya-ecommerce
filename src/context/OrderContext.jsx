@@ -76,6 +76,15 @@ function formatOrder(databaseOrder) {
       0
     );
 
+  const paymentProvider =
+    databaseOrder.payment_provider ||
+    databaseOrder.payment_method ||
+    null;
+
+  const codCharge = Number(
+    databaseOrder.cod_fee ?? 0
+  );
+
   return {
     id: databaseOrder.id,
 
@@ -109,6 +118,22 @@ function formatOrder(databaseOrder) {
       databaseOrder.payment_status ||
       "pending",
 
+    paymentProvider,
+
+    payment_provider:
+      paymentProvider,
+
+    paymentMethod:
+      paymentProvider,
+
+    payment_method:
+      paymentProvider,
+
+    paymentReference:
+      databaseOrder.payment_reference ||
+      databaseOrder.razorpay_payment_id ||
+      null,
+
     fulfillmentStatus:
       databaseOrder.fulfillment_status ||
       "unfulfilled",
@@ -116,14 +141,6 @@ function formatOrder(databaseOrder) {
     fulfillment_status:
       databaseOrder.fulfillment_status ||
       "unfulfilled",
-
-    paymentMethod:
-      databaseOrder.payment_method ||
-      null,
-
-    paymentReference:
-      databaseOrder.payment_reference ||
-      null,
 
     email:
       databaseOrder.customer_email ||
@@ -150,9 +167,19 @@ function formatOrder(databaseOrder) {
       shippingAddress.deliveryMethod ||
       "standard",
 
+    delivery_method:
+      databaseOrder.delivery_method ||
+      shippingAddress.deliveryMethod ||
+      "standard",
+
     items,
 
     itemCount: Number(
+      databaseOrder.item_count ??
+        calculatedItemCount
+    ),
+
+    item_count: Number(
       databaseOrder.item_count ??
         calculatedItemCount
     ),
@@ -172,6 +199,11 @@ function formatOrder(databaseOrder) {
         databaseOrder.shipping_amount ??
         0
     ),
+
+    codCharge,
+
+    cod_fee:
+      codCharge,
 
     discountAmount: Number(
       databaseOrder.discount_amount ||
@@ -203,6 +235,22 @@ function formatOrder(databaseOrder) {
 
     stock_restored_at:
       databaseOrder.stock_restored_at ||
+      null,
+
+    razorpayOrderId:
+      databaseOrder.razorpay_order_id ||
+      null,
+
+    razorpay_order_id:
+      databaseOrder.razorpay_order_id ||
+      null,
+
+    razorpayPaymentId:
+      databaseOrder.razorpay_payment_id ||
+      null,
+
+    razorpay_payment_id:
+      databaseOrder.razorpay_payment_id ||
       null,
   };
 }
@@ -258,6 +306,7 @@ export function OrderProvider({
               order_number,
               status,
               payment_status,
+              payment_provider,
               fulfillment_status,
               email,
               customer_email,
@@ -267,12 +316,15 @@ export function OrderProvider({
               delivery_method,
               subtotal,
               shipping_cost,
+              cod_fee,
               discount_amount,
               total,
               currency,
               item_count,
               notes,
               stock_restored_at,
+              razorpay_order_id,
+              razorpay_payment_id,
               created_at,
               updated_at,
               order_items (
@@ -355,13 +407,6 @@ export function OrderProvider({
     };
   }, [fetchOrders]);
 
-  /*
-   * Checkout now uses the secure
-   * public.place_order() RPC directly.
-   *
-   * This legacy function remains only to
-   * prevent older components from crashing.
-   */
   const addOrder =
     useCallback(async () => {
       throw new Error(

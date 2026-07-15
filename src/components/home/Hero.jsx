@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { heroSlides } from "../../data/heroSlides";
@@ -36,7 +37,7 @@ export default function Hero() {
     <section className="relative overflow-hidden bg-[#fdfdfd] pt-[35px]">
       <div ref={emblaRef} className="overflow-hidden">
         <div className="flex touch-pan-y">
-          {heroSlides.map((slide) => (
+         {heroSlides.map((slide, index) => (
             <article
               key={slide.id}
               className="relative min-w-0 flex-[0_0_100%]"
@@ -72,12 +73,16 @@ export default function Hero() {
                 </div>
 
                 <div className="absolute inset-x-0 bottom-[88px] flex justify-center sm:bottom-[92px] lg:bottom-[105px]">
-                  <a
-                    href={slide.href}
-                    className="border-b border-white pb-1 text-[17px] font-light uppercase tracking-[0.02em] text-white transition-opacity hover:opacity-65 sm:text-[18px] lg:text-[20px]"
-                  >
-                    {slide.buttonText}
-                  </a>
+               <Link
+  to={slide.href}
+  className="border-b pb-1 text-[17px] font-light uppercase tracking-[0.02em] transition-opacity hover:opacity-65 sm:text-[18px] lg:text-[20px]"
+  style={{
+    color: index === 2 ? "#ffffff" : "#000000",
+    borderBottomColor: "#ffffff",
+  }}
+>
+  {slide.buttonText}
+</Link>
                 </div>
               </div>
             </article>

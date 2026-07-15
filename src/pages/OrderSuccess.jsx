@@ -16,15 +16,14 @@ function formatCurrency(amount, currency = "INR") {
   }).format(Number(amount) || 0);
 }
 
-function formatDeliveryMethod(method) {
-  return String(method || "standard")
+function formatWords(value, fallback = "") {
+  return String(value || fallback)
     .replaceAll("_", " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 export default function OrderSuccess() {
   const location = useLocation();
-
   const order = location.state?.order;
 
   if (!order) {
@@ -49,6 +48,24 @@ export default function OrderSuccess() {
     order.deliveryMethod ||
     order.delivery_method ||
     "standard";
+
+  const paymentStatus =
+    order.paymentStatus ||
+    order.payment_status ||
+    "pending";
+
+  const paymentProvider =
+    order.paymentProvider ||
+    order.payment_provider ||
+    (paymentStatus === "paid"
+      ? "razorpay"
+      : "cash_on_delivery");
+
+  const isCashOnDelivery =
+    paymentProvider === "cash_on_delivery";
+
+  const codCharge =
+    Number(order.codCharge ?? order.cod_fee ?? 0);
 
   return (
     <main className="min-h-screen bg-[#f5f1ec] text-[#211c18]">
@@ -110,19 +127,43 @@ export default function OrderSuccess() {
               </span>
 
               <span className="text-[10px]">
-                {formatDeliveryMethod(deliveryMethod)}
+                {formatWords(deliveryMethod, "standard")}
               </span>
             </div>
 
             <div className="mt-5 flex items-center justify-between gap-4">
               <span className="text-[8px] uppercase tracking-[0.18em] text-[#746960]">
-                Payment
+                Payment Method
               </span>
 
               <span className="text-[10px]">
-                Pending
+                {isCashOnDelivery
+                  ? "Cash on Delivery"
+                  : "Razorpay"}
               </span>
             </div>
+
+            <div className="mt-5 flex items-center justify-between gap-4">
+              <span className="text-[8px] uppercase tracking-[0.18em] text-[#746960]">
+                Payment Status
+              </span>
+
+              <span className="text-[10px]">
+                {formatWords(paymentStatus, "pending")}
+              </span>
+            </div>
+
+            {isCashOnDelivery && codCharge > 0 && (
+              <div className="mt-5 flex items-center justify-between gap-4">
+                <span className="text-[8px] uppercase tracking-[0.18em] text-[#746960]">
+                  COD Charge
+                </span>
+
+                <span className="text-[10px]">
+                  {formatCurrency(codCharge, order.currency)}
+                </span>
+              </div>
+            )}
 
             <div className="mt-5 flex items-center justify-between gap-4">
               <span className="text-[8px] uppercase tracking-[0.18em] text-[#746960]">
@@ -160,8 +201,9 @@ export default function OrderSuccess() {
           </div>
 
           <p className="mx-auto mt-8 max-w-[460px] text-[8px] leading-5 text-[#847970]">
-            Payment is currently pending. The order has been created and
-            inventory has been updated successfully.
+            {isCashOnDelivery
+              ? "Your Cash on Delivery order is confirmed. Payment will remain pending until the order is delivered and collected."
+              : "Your Razorpay payment has been verified successfully. Your order is confirmed and inventory has been updated."}
           </p>
         </div>
       </section>

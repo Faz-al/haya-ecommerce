@@ -100,6 +100,27 @@ function formatStatus(value) {
     );
 }
 
+function formatPaymentMethod(
+  provider
+) {
+  if (
+    provider ===
+    "cash_on_delivery"
+  ) {
+    return "Cash on Delivery";
+  }
+
+  if (
+    provider === "razorpay"
+  ) {
+    return "Online Payment";
+  }
+
+  return "Not specified";
+}
+
+
+
 function getStatusClass(status) {
   switch (status) {
     case "delivered":
@@ -216,8 +237,10 @@ export default function AdminOrderDetails() {
               order_number,
               status,
               payment_status,
-              fulfillment_status,
-              email,
+payment_provider,
+fulfillment_status,
+cod_fee,
+email,
               customer_email,
               customer_name,
               customer_phone,
@@ -653,6 +676,22 @@ const stockWasRestored =
                 }
               />
 
+
+              {Number(
+  order.cod_fee ?? 0
+) > 0 && (
+  <DetailRow
+    label="COD Charge"
+    value={formatCurrency(
+      order.cod_fee,
+      order.currency
+    )}
+  />
+)}
+
+
+
+
               <DetailRow
                 label="Discount"
                 value={
@@ -983,13 +1022,20 @@ const stockWasRestored =
               </h2>
             </div>
 
-            <div className="mt-5">
-              <DetailRow
-                label="Status"
-                value={formatStatus(
-                  order.payment_status
-                )}
-              />
+           <div className="mt-5">
+  <DetailRow
+    label="Method"
+    value={formatPaymentMethod(
+      order.payment_provider
+    )}
+  />
+
+  <DetailRow
+    label="Status"
+    value={formatStatus(
+      order.payment_status
+    )}
+  />
 
               <DetailRow
                 label="Currency"
