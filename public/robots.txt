@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+
+Disallow: /admin
+Disallow: /admin/
+Disallow: /account
+Disallow: /account/
+Disallow: /auth
+Disallow: /checkout
+Disallow: /cart
+Disallow: /wishlist
+Disallow: /order-success
+
+Sitemap: https://byhaya.in/sitemap.xml
