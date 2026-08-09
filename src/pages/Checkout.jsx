@@ -870,36 +870,16 @@ export default function Checkout() {
               .razorpay_order_id,
 
           handler: async (
-  paymentResponse
-) => {
-  console.log("🔥 RAZORPAY HANDLER FIRED");
-  console.log("🔥 PAYMENT RESPONSE:", paymentResponse);
-
-  paymentFinished = true;
+            paymentResponse
+          ) => {
+            paymentFinished =
+              true;
 
             setMessage(
               "Payment received. Confirming your order..."
             );
 
             try {
-
-              console.log(
-  "🚀 CALLING razorpay-verify-payment..."
-);
-
-console.log(
-  "🚀 VERIFY PAYLOAD:",
-  {
-    razorpay_payment_id:
-      paymentResponse.razorpay_payment_id,
-
-    razorpay_order_id:
-      paymentResponse.razorpay_order_id,
-
-    razorpay_signature:
-      paymentResponse.razorpay_signature,
-  }
-);
               const {
                 data:
                   verifyData,
